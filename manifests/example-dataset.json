@@ -1,0 +1,8 @@
+{
+  "dataset_id": "example-alpha158-fixture",
+  "schema_version": "example-v1",
+  "fingerprint": "sha256:example",
+  "uri": "object://renquant-data/example-alpha158-fixture.parquet",
+  "asset_class": "equity",
+  "retention_class": "fixture"
+}
