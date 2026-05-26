@@ -38,3 +38,10 @@ class DataManifestValidationJob(Job):
 class DataManifestValidationPipeline(Pipeline):
     def __init__(self) -> None:
         super().__init__([DataManifestValidationJob()], name="data-manifest-validation")
+
+
+def validate_data_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Validate a data manifest and return its audit report."""
+    ctx = DataManifestContext(manifest)
+    DataManifestValidationPipeline().run(ctx)
+    return ctx.validation_report

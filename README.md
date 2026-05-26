@@ -2,6 +2,17 @@
 
 Data-manifest repository for RenQuant.
 
+Operating model: https://github.com/hallovorld/RenQuant/blob/main/doc/arch/subrepo-operating-model.md
+
+Repository map: [RENQUANT_REPOS.md](RENQUANT_REPOS.md)
+
+Local automation:
+
+```bash
+make test
+make doctor
+```
+
 This repo tracks data contracts, fingerprints, schemas, and object locations.
 It does not store large parquet/zip/database files in normal Git.
 

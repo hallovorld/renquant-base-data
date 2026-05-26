@@ -1,0 +1,34 @@
+schema_version: 1
+name: renquant-base-data
+role: base data manifests and validation pipeline
+operating_model: https://github.com/hallovorld/RenQuant/blob/main/doc/arch/subrepo-operating-model.md
+repo_map: RENQUANT_REPOS.md
+pipeline_required: true
+branch_policy:
+  main: stable interface for downstream repos and automation
+  feature_branches: experiments, optimizations, and large upgrades
+source_repo:
+  name: RenQuant
+  never_delete: true
+dependencies:
+  - renquant-common
+inputs:
+  - data provider credentials from environment
+  - source data URIs
+outputs:
+  - dataset manifests
+  - schema validation reports
+  - freshness and fingerprint reports
+owns:
+  - data manifests
+  - schema and freshness contracts
+  - data materialization policy
+  - backup pointers
+forbidden:
+  - large data blobs in normal Git
+  - model training
+  - broker execution
+  - strategy threshold ownership
+automation:
+  test: make test
+  doctor: make doctor
