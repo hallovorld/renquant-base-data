@@ -11,6 +11,12 @@ LIFTED_MODULES = [
     "renquant_base_data.loaders.fundamentals",
     "renquant_base_data.loaders.macro_per_ticker",
     "renquant_base_data.loaders.row_coverage",
+    "renquant_base_data.loaders.data",
+    "renquant_base_data.loaders.indicators",
+    "renquant_base_data.loaders.macro",
+    "renquant_base_data.loaders.fred_macro",
+    "renquant_base_data.loaders.earnings_surprise",
+    "renquant_base_data.loaders.insider_trades",
 ]
 
 
