@@ -10,6 +10,12 @@ import-clean. The umbrella keeps its working copy until cutover.
 * ``fundamentals``    — fundamental feature loaders
 * ``macro_per_ticker``— per-ticker macro overlays
 * ``row_coverage``    — panel row-coverage checks
+* ``data``            — OHLCV / panel data access
+* ``indicators``      — technical-indicator feature builders
+* ``macro``           — macro series loaders
+* ``fred_macro``      — FRED macro ingestion
+* ``earnings_surprise``— PEAD / SUE earnings-surprise features
+* ``insider_trades``  — insider-transaction features
 """
 from __future__ import annotations
 
