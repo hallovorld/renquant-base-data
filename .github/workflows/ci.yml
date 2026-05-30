@@ -14,7 +14,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: hallovorld/renquant-common
-          ref: codex/shared-training-run-recorder
           path: renquant-common
       - uses: actions/setup-python@v5
         with:
