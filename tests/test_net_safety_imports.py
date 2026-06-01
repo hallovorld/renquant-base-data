@@ -62,8 +62,22 @@ def test_no_relative_net_safety_import(module_name: str) -> None:
     )
 
 
-def test_lazy_import_paths_resolve() -> None:
-    """Exercise the in-function lazy imports — they only run when the function is called."""
+def test_lazy_import_paths_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the in-function lazy `from renquant_common.net_safety import ...` lines.
+
+    Hermetic by construction:
+    - `renquant_common.net_safety.call_with_timeout` is patched to return None, so any
+      function call shaped `result = call_with_timeout(real_fetch, ...)` short-circuits
+      before touching the network or writing to disk.
+    - Watchlist functions get `cache=False` + a stub `provider_fn` so even if a code path
+      bypasses `call_with_timeout`, no provider gets invoked and no `data/` parquet is
+      written (which would otherwise trip `test_no_large_files.py`).
+    - The lazy import happens at the first statement of the function body and runs BEFORE
+      any of the above neutering matters; that's exactly the import path we want to verify.
+    """
+    import renquant_common.net_safety as ns
+    monkeypatch.setattr(ns, "call_with_timeout", lambda *args, **kwargs: None)
+
     mods_to_probe = [
         ("renquant_base_data.loaders.fundamentals", "fetch_fundamentals_watchlist"),
         ("renquant_base_data.fetchers.fundamentals", "fetch_fundamentals_watchlist"),
@@ -77,7 +91,7 @@ def test_lazy_import_paths_resolve() -> None:
             if fn_name == "_fetch_from_yfinance":
                 fn("AAPL")
             else:
-                fn(["AAPL"])
+                fn(["AAPL"], cache=False, provider_fn=lambda *_a, **_kw: {})
         except ModuleNotFoundError as exc:
             if "net_safety" in str(exc):
                 pytest.fail(f"{mod_name}.{fn_name} still resolves a missing net_safety: {exc}")
