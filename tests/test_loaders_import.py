@@ -6,6 +6,7 @@ import importlib
 import pytest
 
 LIFTED_MODULES = [
+    "renquant_base_data.alpha158_fund_panel",
     "renquant_base_data.loaders.data_cache",
     "renquant_base_data.loaders.data_coverage",
     "renquant_base_data.loaders.fundamentals",
