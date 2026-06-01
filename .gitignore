@@ -11,3 +11,4 @@ data/
 *.db
 *.db-shm
 *.db-wal
+src/*.egg-info/
