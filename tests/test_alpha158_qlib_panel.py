@@ -93,3 +93,22 @@ def test_build_alpha158_qlib_panel_requires_spy_for_excess_labels(tmp_path: Path
 
     with pytest.raises(FileNotFoundError, match="SPY OHLCV"):
         build_alpha158_qlib_panel(tmp_path, max_workers=1)
+
+
+def test_build_alpha158_qlib_panel_with_track_b_appends_four_features(tmp_path: Path) -> None:
+    from renquant_base_data.track_b_features import TRACK_B_FEATURES
+
+    _write_inputs(tmp_path)
+
+    out = build_alpha158_qlib_panel(tmp_path, max_workers=1, include_track_b=True)
+    panel = pd.read_parquet(out)
+    stats = json.loads(out.with_suffix(".stats.json").read_text())
+
+    # All 4 Track B features are present, ordered after baseline alpha158.
+    for col in TRACK_B_FEATURES:
+        assert col in panel.columns, f"missing Track B column {col}"
+        assert col in stats["feature_cols"], f"Track B column {col} not in stats"
+    # The baseline 158 alpha features survive too.
+    assert len(stats["feature_cols"]) == EXPECTED_ALPHA158_FEATURES + len(TRACK_B_FEATURES)
+    # Train-only stats fit applied (no infinities, no NaNs in feature cols).
+    assert not panel[stats["feature_cols"]].isna().any().any()
