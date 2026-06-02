@@ -19,6 +19,11 @@ import numpy as np
 import pandas as pd
 from renquant_common import Job, Pipeline, Task, run_parallel
 
+from .track_b_features import (
+    TRACK_B_FEATURES,
+    add_track_b_features,
+)
+
 
 for _key in (
     "OMP_NUM_THREADS",
@@ -45,6 +50,24 @@ DEFAULT_EXISTING_ENGINEERED_FILENAME = "transformer_dataset_engineered.parquet"
 DEFAULT_OHLCV_DIRNAME = "ohlcv"
 DEFAULT_OUTPUT_FILENAME = "alpha158_qlib_dataset.parquet"
 
+# Minimum number of finite observations per Track B feature on the train
+# split before the panel build is allowed to proceed. Matches one full
+# 252-day warmup window so the per-feature train mean / std come from at
+# least one full canonical lookback. Anything less leaves the
+# NormalizeAndAnnotateJob computing NaN means/stds that get masked by the
+# downstream fillna(0.0) — silently emitting zero columns advertised as
+# live features (PR #16 codex HIGH finding, 2026-06-02).
+MIN_TRACK_B_TRAIN_OBS = 252
+
+
+class InsufficientTrainHistoryError(RuntimeError):
+    """Raised when ``include_track_b=True`` but the train split lacks enough
+    finite observations for one or more Track B features. Names the offending
+    feature(s) + observed counts so operators see the missing dependency
+    directly. Operators may either extend the input history OR drop
+    ``--include-track-b``; silently emitting all-zero columns is forbidden.
+    """
+
 
 @dataclass
 class Alpha158QlibConfig:
@@ -58,6 +81,10 @@ class Alpha158QlibConfig:
     max_workers: int | None = None
     timeout_seconds: float | None = None
     progress_log_seconds: float = 30.0
+    # Track B (BULL_CALM signal recovery, 2026-06-02): when True, append
+    # the 4 canonical low-vol/momentum features to the panel. Off by default
+    # so the existing 158-feature artifact contract is byte-stable.
+    include_track_b: bool = False
 
     def resolved(self) -> "Alpha158QlibConfig":
         data_dir = Path(self.data_dir).expanduser().resolve()
@@ -78,6 +105,7 @@ class Alpha158QlibConfig:
             max_workers=self.max_workers,
             timeout_seconds=self.timeout_seconds,
             progress_log_seconds=float(self.progress_log_seconds),
+            include_track_b=bool(self.include_track_b),
         )
 
 
@@ -400,11 +428,125 @@ class BuildFeaturePanelJob(Job):
         ctx.feature_cols = [col for col in panel.columns if col not in ("ticker", "date")]
         if len(ctx.feature_cols) != EXPECTED_ALPHA158_FEATURES:
             raise RuntimeError(
-                f"alpha158 feature count changed: {len(ctx.feature_cols)} != {EXPECTED_ALPHA158_FEATURES}"
+                f"alpha158 feature count changed: {len(ctx.feature_cols)} != "
+                f"{EXPECTED_ALPHA158_FEATURES} (baseline alpha158 stage; Track B "
+                f"features are appended later by AddTrackBFeaturesJob)"
             )
         panel[ctx.feature_cols] = panel[ctx.feature_cols].replace([np.inf, -np.inf], np.nan)
         ctx.panel = panel
         log.info("Raw alpha158 panel rows=%d feature_cols=%d", len(panel), len(ctx.feature_cols))
+
+
+class AddTrackBFeaturesJob(Job):
+    """Track B (BULL_CALM signal recovery, 2026-06-02): append the 4 canonical
+    low-vol/momentum features (mom_carry_12_1, beta_dm, rvar_total, idio_vol_market)
+    to the alpha158 panel. Reads each ticker's raw close+volume from the OHLCV
+    parquet (already validated upstream) and uses the SPY close as the market leg.
+    Skipped when ``config.include_track_b`` is False; the existing 158-feature
+    artifact is byte-stable in that branch.
+    """
+
+    def should_skip(self, ctx: Alpha158QlibContext) -> bool:
+        return not bool(ctx.config.include_track_b)
+
+    def run(self, ctx: Alpha158QlibContext) -> None:
+        cfg = ctx.config
+        panel = _require_panel(ctx)
+        spy_path = cfg.ohlcv_dir / "SPY" / "1d.parquet"
+        if not spy_path.exists():
+            raise FileNotFoundError(
+                f"SPY OHLCV not found at {spy_path}; cannot compute Track B features"
+            )
+        spy_close = _load_ohlcv(spy_path)["close"].sort_index().rename("spy_close")
+        # Re-attach raw close+volume per ticker so the feature builder can
+        # operate; the alpha158 build dropped them. Per-ticker join keeps the
+        # alpha158 panel rows immutable.
+        ohlcv_rows: list[pd.DataFrame] = []
+        for ticker in panel["ticker"].unique():
+            path = cfg.ohlcv_dir / ticker / "1d.parquet"
+            if not path.exists():
+                continue
+            try:
+                tk = _load_ohlcv(path)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("%s: track-b OHLCV read failed: %s", ticker, exc)
+                continue
+            tk = tk[["close", "volume"]].copy()
+            tk["ticker"] = ticker
+            tk["date"] = pd.to_datetime(tk.index)
+            ohlcv_rows.append(tk.reset_index(drop=True))
+        if not ohlcv_rows:
+            raise RuntimeError("Track B: no OHLCV available for any ticker in panel")
+        ohlcv_panel = pd.concat(ohlcv_rows, ignore_index=True)
+        merged = panel.merge(ohlcv_panel, on=["ticker", "date"], how="left")
+        if len(merged) != len(panel):
+            raise RuntimeError(
+                f"Track B OHLCV merge changed row count: {len(panel)} -> {len(merged)}"
+            )
+        with_tb = add_track_b_features(merged, spy_close=spy_close)
+        # Drop the temporary raw OHLCV columns; only the 4 new features stay.
+        with_tb = with_tb.drop(columns=["close", "volume"])
+        with_tb[list(TRACK_B_FEATURES)] = (
+            with_tb[list(TRACK_B_FEATURES)].replace([np.inf, -np.inf], np.nan)
+        )
+        # HIGH-finding guard (codex PR #16 review, 2026-06-02): fail-loud
+        # when train-split history is too short for the 252-day windows.
+        # Fired AT THE SOURCE so downstream stats fitting never sees a
+        # silently-zeroed column.
+        _validate_track_b_train_history(with_tb, cfg)
+        ctx.feature_cols = list(ctx.feature_cols) + list(TRACK_B_FEATURES)
+        with_tb[ctx.feature_cols] = with_tb[ctx.feature_cols].replace([np.inf, -np.inf], np.nan)
+        ctx.panel = with_tb
+        log.info(
+            "Track B features added: %s (panel rows=%d feature_cols=%d)",
+            ", ".join(TRACK_B_FEATURES), len(with_tb), len(ctx.feature_cols),
+        )
+
+
+def _validate_track_b_train_history(
+    panel: pd.DataFrame, cfg: Alpha158QlibConfig
+) -> None:
+    """Per-feature finite-observation gate on the train split.
+
+    Reads the same ``existing_engineered_path`` split label that
+    ``NormalizeAndAnnotateJob`` uses, slices the train rows, and counts
+    finite (non-NaN, non-Inf) observations per Track B feature. Raises
+    ``InsufficientTrainHistoryError`` listing every offending feature when
+    any count is below ``MIN_TRACK_B_TRAIN_OBS``.
+    """
+    existing = pd.read_parquet(cfg.existing_engineered_path)
+    if "split_label" not in existing.columns:
+        raise ValueError(
+            f"{cfg.existing_engineered_path} missing split_label "
+            "(needed to gate Track B train-history sufficiency)"
+        )
+    existing["date"] = pd.to_datetime(existing["date"])
+    date_split = (
+        existing[["date", "split_label"]]
+        .drop_duplicates("date")
+        .set_index("date")["split_label"]
+    )
+    panel_dates = pd.to_datetime(panel["date"])
+    split_labels = panel_dates.map(date_split).fillna("test")
+    train_mask = (split_labels == "train").to_numpy()
+    deficiencies: dict[str, int] = {}
+    for col in TRACK_B_FEATURES:
+        col_train = panel.loc[train_mask, col]
+        finite_count = int(np.isfinite(col_train.to_numpy(dtype=float)).sum())
+        if finite_count < MIN_TRACK_B_TRAIN_OBS:
+            deficiencies[col] = finite_count
+    if deficiencies:
+        details = ", ".join(
+            f"{col}={count}<{MIN_TRACK_B_TRAIN_OBS}"
+            for col, count in sorted(deficiencies.items())
+        )
+        raise InsufficientTrainHistoryError(
+            f"Track B train-history gate failed: {details}. Each feature "
+            f"requires ≥{MIN_TRACK_B_TRAIN_OBS} finite observations in the "
+            "train split (one full 252-day warmup window). Either extend "
+            "the input OHLCV history covering the train window, or drop "
+            "--include-track-b for this build."
+        )
 
 
 class BuildLabelsJob(Job):
@@ -536,6 +678,7 @@ def build_alpha158_qlib_pipeline() -> Pipeline:
         [
             LoadUniverseJob(),
             BuildFeaturePanelJob(),
+            AddTrackBFeaturesJob(),
             BuildLabelsJob(),
             NormalizeAndAnnotateJob(),
             PersistResultsJob(),
@@ -556,6 +699,7 @@ def build_alpha158_qlib_panel(
     max_workers: int | None = None,
     timeout_seconds: float | None = None,
     progress_log_seconds: float = 30.0,
+    include_track_b: bool = False,
 ) -> Path:
     config = Alpha158QlibConfig(
         data_dir=Path(data_dir),
@@ -568,6 +712,7 @@ def build_alpha158_qlib_panel(
         max_workers=max_workers,
         timeout_seconds=timeout_seconds,
         progress_log_seconds=progress_log_seconds,
+        include_track_b=include_track_b,
     ).resolved()
     ctx = Alpha158QlibContext(config=config)
     build_alpha158_qlib_pipeline().run(ctx)
@@ -588,6 +733,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-workers", type=int, default=None)
     parser.add_argument("--timeout-seconds", type=float, default=None)
     parser.add_argument("--progress-log-seconds", type=float, default=30.0)
+    parser.add_argument(
+        "--include-track-b",
+        action="store_true",
+        help=(
+            "Append the 4 Track B BULL_CALM-regime features (mom_carry_12_1, "
+            "beta_dm, rvar_total, idio_vol_market). Default: off — preserves the "
+            "158-feature baseline contract."
+        ),
+    )
     return parser
 
 
@@ -605,6 +759,7 @@ def main(argv: list[str] | None = None) -> int:
         max_workers=args.max_workers,
         timeout_seconds=args.timeout_seconds,
         progress_log_seconds=args.progress_log_seconds,
+        include_track_b=args.include_track_b,
     )
     return 0
 
@@ -612,6 +767,8 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = [
     "Alpha158QlibConfig",
     "EXPECTED_ALPHA158_FEATURES",
+    "InsufficientTrainHistoryError",
+    "MIN_TRACK_B_TRAIN_OBS",
     "build_alpha158_qlib_panel",
     "build_alpha158_qlib_pipeline",
     "build_features_for_ticker",
