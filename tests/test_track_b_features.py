@@ -7,7 +7,7 @@ feature value at ``t``.
 Canonical references (see ``src/renquant_base_data/track_b_features.py``):
   - Kelly-Gu-Xiu 2020 RFS Eq. (4) — mom_carry_12_1
   - Frazzini-Pedersen 2014 JFE — beta_dm
-  - Ang-Hodrick-Xing-Zhang 2006 JF — idio_vol_3f
+  - Ang-Hodrick-Xing-Zhang 2006 JF — idio_vol_market (market+size 2-factor residual)
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from renquant_base_data.track_b_features import (
     VOL_WINDOW,
     add_track_b_features,
     beta_dm,
-    idio_vol_3f,
+    idio_vol_market,
     mom_carry_12_1,
     rvar_total,
 )
@@ -44,22 +44,34 @@ def _make_close(seed: int, n: int = 400, start: float = 100.0) -> pd.Series:
 
 
 def test_mom_carry_12_1_matches_hand_computation():
-    close = pd.Series(
-        [100.0, 102.0, 101.0, 103.0, 105.0, 104.0],
-        index=pd.bdate_range("2025-01-02", periods=6),
-        name="close",
-    )
-    # Override the global skips locally with a tiny window for the unit test:
-    # using shift(2) numerator and shift(4) denominator, hand-computed:
-    # at idx=4: shift(2)=101, shift(4)=100 -> 101/100 - 1 = 0.01
-    # at idx=5: shift(2)=103, shift(4)=102 -> 103/102 - 1 ≈ 0.009803921...
-    num = close.shift(2)
-    den = close.shift(4)
-    expected = num / den - 1.0
-    actual = num / den - 1.0  # mirrors mom_carry_12_1 formula with custom windows
-    pd.testing.assert_series_equal(actual, expected)
-    # The production helper uses 21d/252d; we test the formula identity with
-    # a short series via the same arithmetic to keep the assertion exact.
+    """Pin ``mom_carry_12_1`` against literal hand-computed values from the
+    REAL helper (not a re-expression of the formula). An off-by-one in
+    ``MOM_SKIP_DAYS`` / ``MOM_LONG_DAYS`` or a flipped numerator/denominator
+    in the helper would fail this. Fixes codex PR #16 LOW finding.
+    """
+    # Deterministic linear close: close[i] = 100 + i. Long enough for the
+    # production 252-day window plus a small inspection tail.
+    n = MOM_LONG_DAYS + 6
+    idx = pd.bdate_range("2024-01-02", periods=n)
+    close = pd.Series([100.0 + i for i in range(n)], index=idx, name="close")
+    actual = mom_carry_12_1(close)
+
+    # Pre-warmup must be NaN (first MOM_LONG_DAYS values lack history).
+    assert actual.iloc[MOM_LONG_DAYS - 1] != actual.iloc[MOM_LONG_DAYS - 1]  # NaN
+    # Just past warmup (t = MOM_LONG_DAYS): num = close[t - skip], den = close[t - long].
+    t0 = MOM_LONG_DAYS  # = 252
+    expected_t0 = (100.0 + (t0 - MOM_SKIP_DAYS)) / (100.0 + (t0 - MOM_LONG_DAYS)) - 1.0
+    assert actual.iloc[t0] == pytest.approx(expected_t0, rel=1e-12, abs=1e-15)
+    # Three more sample points to lock the window arithmetic.
+    for offset in (1, 3, 5):
+        t = t0 + offset
+        num_val = 100.0 + (t - MOM_SKIP_DAYS)  # close at t - 21
+        den_val = 100.0 + (t - MOM_LONG_DAYS)  # close at t - 252
+        expected = num_val / den_val - 1.0
+        assert actual.iloc[t] == pytest.approx(expected, rel=1e-12, abs=1e-15), (
+            f"mom_carry_12_1 mismatch at t={t}: got {actual.iloc[t]}, "
+            f"hand-computed {expected}"
+        )
 
 
 def test_mom_carry_12_1_production_windows_no_nan_after_warmup():
@@ -127,16 +139,33 @@ def test_beta_dm_causal_at_t_does_not_use_future():
 
 
 def test_rvar_total_matches_hand_sum_of_squared_returns():
-    close = pd.Series(
-        [100.0, 102.0, 101.0, 99.0, 100.0, 103.0, 105.0],
-        index=pd.bdate_range("2025-01-02", periods=7),
-        name="close",
+    """Pin ``rvar_total`` against literal hand-computed sum-of-squared returns
+    from the REAL helper. A wrong window size (e.g. 30 instead of 60) or a
+    swapped-sign return would fail this. Fixes codex PR #16 LOW finding.
+    """
+    # Geometric-progression close with a constant per-bar return r so the
+    # arithmetic is exact: close[i] = base * (1 + r) ** i  =>  pct_change == r.
+    # rvar_total at index i is sum_{k=0..VOL_WINDOW-1} r^2 = VOL_WINDOW * r^2
+    # for every i >= VOL_WINDOW (because pct_change[0] is NaN, the first
+    # window with VOL_WINDOW valid returns lands at i = VOL_WINDOW).
+    n = VOL_WINDOW + 10
+    r = 0.0125  # 1.25 bp / day
+    idx = pd.bdate_range("2024-01-02", periods=n)
+    close = pd.Series([100.0 * (1.0 + r) ** i for i in range(n)], index=idx)
+    actual = rvar_total(close)
+
+    # Pre-warmup must be NaN: at i = VOL_WINDOW - 1 there are only
+    # VOL_WINDOW - 1 valid returns inside the window (since pct_change[0] is NaN).
+    assert actual.iloc[VOL_WINDOW - 1] != actual.iloc[VOL_WINDOW - 1]  # NaN
+    # At i = VOL_WINDOW, all 60 returns inside the window are valid and equal r.
+    expected_at_window_start = float(VOL_WINDOW) * (r ** 2)
+    assert actual.iloc[VOL_WINDOW] == pytest.approx(
+        expected_at_window_start, rel=1e-12, abs=1e-15
     )
-    # Use a tiny window=3 for hand-computation; reuse the same logic
-    rets = close.pct_change()
-    expected = (rets * rets).rolling(3).sum()
-    actual = (rets * rets).rolling(3).sum()
-    pd.testing.assert_series_equal(actual, expected)
+    # The constant-return property means rvar_total is flat across the tail.
+    tail = actual.iloc[VOL_WINDOW : VOL_WINDOW + 5]
+    for val in tail:
+        assert val == pytest.approx(expected_at_window_start, rel=1e-12, abs=1e-15)
 
 
 def test_rvar_total_production_window_causal():
@@ -156,10 +185,10 @@ def test_rvar_total_is_non_negative():
     assert (out >= 0).all()
 
 
-# ── 4. idio_vol_3f ─────────────────────────────────────────────────────────
+# ── 4. idio_vol_market ─────────────────────────────────────────────────────
 
 
-def test_idio_vol_3f_returns_zero_resid_for_perfect_linear_combo():
+def test_idio_vol_market_returns_zero_resid_for_perfect_linear_combo():
     rng = np.random.default_rng(7)
     n = 200
     idx = pd.bdate_range("2024-01-02", periods=n)
@@ -169,13 +198,13 @@ def test_idio_vol_3f_returns_zero_resid_for_perfect_linear_combo():
     # Construct close so that close.pct_change() == spy_ret elementwise.
     close = (1.0 + spy_ret).cumprod() * 50.0
     size = pd.Series(np.log1p(1_000_000.0), index=idx)
-    out = idio_vol_3f(close, spy, size, sector_close=None)
+    out = idio_vol_market(close, spy, size, sector_close=None)
     # The residual std should be essentially zero (~ floating-point noise).
     tail = out.dropna().iloc[-50:]
     assert (tail.abs() < 1e-8).all(), f"expected ~0 residual std, got {tail.describe()}"
 
 
-def test_idio_vol_3f_causal_at_t_does_not_use_future():
+def test_idio_vol_market_causal_at_t_does_not_use_future():
     rng = np.random.default_rng(13)
     n = 200
     idx = pd.bdate_range("2024-01-02", periods=n)
@@ -184,12 +213,12 @@ def test_idio_vol_3f_causal_at_t_does_not_use_future():
     size = np.log1p(pd.Series(rng.uniform(1e5, 1e7, n), index=idx))
     sector = pd.Series(np.exp(np.cumsum(rng.normal(0, 0.012, n))) * 80, index=idx)
     t = 150
-    baseline = idio_vol_3f(close, spy, size, sector).iloc[t]
+    baseline = idio_vol_market(close, spy, size, sector).iloc[t]
     perturbed_close = close.copy(); perturbed_close.iloc[t + 1 :] *= 5
     perturbed_spy = spy.copy(); perturbed_spy.iloc[t + 1 :] *= 5
     perturbed_size = size.copy(); perturbed_size.iloc[t + 1 :] *= 5
     perturbed_sec = sector.copy(); perturbed_sec.iloc[t + 1 :] *= 5
-    after = idio_vol_3f(perturbed_close, perturbed_spy, perturbed_size, perturbed_sec).iloc[t]
+    after = idio_vol_market(perturbed_close, perturbed_spy, perturbed_size, perturbed_sec).iloc[t]
     assert np.isfinite(baseline)
     assert baseline == pytest.approx(after, rel=1e-9, abs=1e-12)
 
@@ -231,4 +260,4 @@ def test_track_b_feature_count_constants_match_canonical_references():
     assert MOM_SKIP_DAYS == 21
     assert BETA_WINDOW == 252
     assert VOL_WINDOW == 60
-    assert TRACK_B_FEATURES == ("mom_carry_12_1", "beta_dm", "rvar_total", "idio_vol_3f")
+    assert TRACK_B_FEATURES == ("mom_carry_12_1", "beta_dm", "rvar_total", "idio_vol_market")

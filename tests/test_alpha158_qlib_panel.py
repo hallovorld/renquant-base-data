@@ -10,15 +10,31 @@ import pytest
 
 from renquant_base_data.alpha158_qlib_panel import (
     EXPECTED_ALPHA158_FEATURES,
+    InsufficientTrainHistoryError,
+    MIN_TRACK_B_TRAIN_OBS,
     build_alpha158_qlib_panel,
 )
 
 
 pytest.importorskip("pyarrow")
 
+# Default fixture row count must exceed one 252-day Track B warmup window
+# plus enough train rows to satisfy MIN_TRACK_B_TRAIN_OBS finite-observation
+# gate. 600 rows: ~503 train + ~50 val + ~47 test leaves > MIN_TRACK_B_TRAIN_OBS
+# finite samples for each 252-day feature in train.
+_DEFAULT_ROWS = 600
 
-def _write_ohlcv(data_dir: Path, ticker: str, *, base: float, slope: float, phase: float) -> None:
-    dates = pd.bdate_range("2025-01-02", periods=150)
+
+def _write_ohlcv(
+    data_dir: Path,
+    ticker: str,
+    *,
+    base: float,
+    slope: float,
+    phase: float,
+    rows: int = _DEFAULT_ROWS,
+) -> None:
+    dates = pd.bdate_range("2024-01-02", periods=rows)
     x = np.arange(len(dates), dtype=float)
     close = base + slope * x + 0.35 * np.sin(x / 8.0 + phase)
     open_ = close * (1.0 + 0.001 * np.cos(x / 7.0))
@@ -40,7 +56,9 @@ def _write_ohlcv(data_dir: Path, ticker: str, *, base: float, slope: float, phas
     df.to_parquet(out_dir / "1d.parquet")
 
 
-def _write_inputs(data_dir: Path, *, include_spy: bool = True) -> None:
+def _write_inputs(
+    data_dir: Path, *, include_spy: bool = True, rows: int = _DEFAULT_ROWS
+) -> None:
     (data_dir / "transformer_universe_inventory.json").write_text(
         json.dumps({"tier_A_tickers": ["AAA"], "tier_B_tickers": ["BBB"]})
     )
@@ -55,19 +73,23 @@ def _write_inputs(data_dir: Path, *, include_spy: bool = True) -> None:
         )
     )
 
-    dates = pd.bdate_range("2025-01-02", periods=150)
+    dates = pd.bdate_range("2024-01-02", periods=rows)
     split = pd.Series("test", index=dates)
-    split.iloc[:90] = "train"
-    split.iloc[90:120] = "val"
+    # ~84% train / ~8% val / ~8% test so train comfortably covers >252 finite
+    # observations per Track B feature even after the 252-day warmup is NaN.
+    train_end = int(rows * 0.84)
+    val_end = int(rows * 0.92)
+    split.iloc[:train_end] = "train"
+    split.iloc[train_end:val_end] = "val"
     pd.DataFrame({"date": dates, "split_label": split.values}).to_parquet(
         data_dir / "transformer_dataset_engineered.parquet",
         index=False,
     )
 
-    _write_ohlcv(data_dir, "AAA", base=50.0, slope=0.08, phase=0.0)
-    _write_ohlcv(data_dir, "BBB", base=80.0, slope=0.03, phase=0.9)
+    _write_ohlcv(data_dir, "AAA", base=50.0, slope=0.08, phase=0.0, rows=rows)
+    _write_ohlcv(data_dir, "BBB", base=80.0, slope=0.03, phase=0.9, rows=rows)
     if include_spy:
-        _write_ohlcv(data_dir, "SPY", base=300.0, slope=0.05, phase=0.4)
+        _write_ohlcv(data_dir, "SPY", base=300.0, slope=0.05, phase=0.4, rows=rows)
 
 
 def test_build_alpha158_qlib_panel_writes_dataset_and_stats(tmp_path: Path) -> None:
@@ -112,3 +134,41 @@ def test_build_alpha158_qlib_panel_with_track_b_appends_four_features(tmp_path: 
     assert len(stats["feature_cols"]) == EXPECTED_ALPHA158_FEATURES + len(TRACK_B_FEATURES)
     # Train-only stats fit applied (no infinities, no NaNs in feature cols).
     assert not panel[stats["feature_cols"]].isna().any().any()
+
+    # HIGH-finding regression guard (codex PR #16 review, 2026-06-02): the
+    # Track B feature means/stds in the stats artifact MUST be finite, and
+    # the materialized columns MUST NOT be identically zero. A bare-NaN
+    # mean here would mean NormalizeAndAnnotateJob silently turned the
+    # advertised feature into all-zero downstream, the exact silent-NaN
+    # propagation the reviewer caught.
+    for col in TRACK_B_FEATURES:
+        col_idx = stats["feature_cols"].index(col)
+        mean = stats["feature_means"][col_idx]
+        std = stats["feature_stds"][col_idx]
+        assert np.isfinite(mean), f"Track B {col} train mean not finite: {mean}"
+        assert np.isfinite(std), f"Track B {col} train std not finite: {std}"
+        # The materialized column has SOME non-zero values across the panel
+        # (otherwise the feature is effectively dead even if stats look ok).
+        col_values = panel[col].to_numpy(dtype=float)
+        assert np.any(np.abs(col_values) > 1e-12), (
+            f"Track B {col} column is identically zero post-normalize "
+            "(silent NaN-fill collapse)"
+        )
+
+
+def test_build_alpha158_qlib_panel_track_b_raises_on_insufficient_train_history(
+    tmp_path: Path,
+) -> None:
+    """Negative test for codex PR #16 HIGH finding: when the train split has
+    fewer than ``MIN_TRACK_B_TRAIN_OBS`` finite observations for any 252-day
+    Track B feature, the build must raise ``InsufficientTrainHistoryError``
+    at the source — NOT silently emit zero columns advertised as live
+    features.
+    """
+    _write_inputs(tmp_path, rows=150)  # < 252, both 252-day features all-NaN
+    with pytest.raises(InsufficientTrainHistoryError) as excinfo:
+        build_alpha158_qlib_panel(tmp_path, max_workers=1, include_track_b=True)
+    msg = str(excinfo.value)
+    assert "mom_carry_12_1" in msg
+    assert "beta_dm" in msg
+    assert str(MIN_TRACK_B_TRAIN_OBS) in msg

@@ -9,13 +9,23 @@ References (read, not name-dropped):
     sorts cross-sectionally on this beta.
   - Ang, A., Hodrick, R. J., Xing, Y., & Zhang, X. (2006). "The
     Cross-Section of Volatility and Expected Returns." *Journal of
-    Finance* 61(1), 259-299. 3-factor idio-vol = residual std after
-    regressing returns on systematic factors.
+    Finance* 61(1), 259-299. Idio-vol = residual std after regressing
+    returns on systematic factors. Our production variant is the
+    market+size 2-factor residual (``idio_vol_market``); the section II.B
+    methodology note permits alternate factor sets.
 
 Causality contract: every output value at date ``t`` uses only data at
 dates ``<= t``. Test ``track_b_features_no_future_leak`` enforces this.
 
 Implementations are intentionally compact; each helper is < 30 lines.
+
+Naming note (2026-06-02 codex review on PR #16): the production
+``idio_vol_market`` is a SPY+size 2-factor residual std, NOT a 3-factor
+Ang-Hodrick-Xing-Zhang style residual. The earlier ``idio_vol_3f`` name
+was misleading because production never threads a sector ETF leg through
+the base-data pipeline (the sector taxonomy lives in the strategy layer,
+not base-data). The helper still accepts an optional ``sector_close``
+arg for research callers that DO have sector OHLCV in hand.
 """
 from __future__ import annotations
 
@@ -26,7 +36,7 @@ TRACK_B_FEATURES: tuple[str, ...] = (
     "mom_carry_12_1",
     "beta_dm",
     "rvar_total",
-    "idio_vol_3f",
+    "idio_vol_market",
 )
 
 # Standard cross-sectional momentum windows. 252 ~ 12 trading months;
@@ -91,24 +101,28 @@ def rvar_total(close: pd.Series) -> pd.Series:
     return (r * r).rolling(VOL_WINDOW).sum()
 
 
-def idio_vol_3f(
+def idio_vol_market(
     close: pd.Series,
     spy_close: pd.Series,
     size_proxy: pd.Series,
     sector_close: pd.Series | None = None,
 ) -> pd.Series:
     """Rolling 60-day idiosyncratic volatility after orthogonalizing daily
-    returns vs (SPY return, sector ETF return, size proxy).
+    returns vs (SPY return, size proxy, optional sector ETF return).
 
-    Per Ang-Hodrick-Xing-Zhang 2006 — residual std from a multi-factor
-    regression. We use SPY as the market factor and either the ticker's
-    sector ETF return (when supplied) or a constant zero (size-only fallback)
-    as the sector factor. ``size_proxy`` is log(dollar volume) z-score over
-    the same window (used in place of log-market-cap when fund data is
-    absent, per Ang-Hodrick-Xing-Zhang section II.B).
+    Per Ang-Hodrick-Xing-Zhang 2006 methodology (section II.B permits
+    alternate factor sets) — residual std from a multi-factor regression.
+    Production callers pass ``sector_close=None`` (the sector taxonomy lives
+    in the strategy layer, not base-data), so the prod feature is the
+    market+size 2-factor residual. Research callers with sector ETF OHLCV
+    in hand may supply ``sector_close`` for the 3-factor variant.
+
+    ``size_proxy`` is log(dollar volume) z-score over the same window (used
+    in place of log-market-cap when fund data is absent, per
+    Ang-Hodrick-Xing-Zhang section II.B).
 
     Implementation: build the ``[ret_s, ret_m, ret_sec, size]`` matrix,
-    rolling-window OLS the stock return on the 3 factors, return the
+    rolling-window OLS the stock return on the factors, return the
     residual std over the window. Vectorized via covariance algebra
     (avoiding statsmodels-per-window).
 
@@ -179,7 +193,9 @@ def add_track_b_features(
         g["mom_carry_12_1"] = mom_carry_12_1(close).to_numpy()
         g["beta_dm"] = beta_dm(close, spy_close).to_numpy()
         g["rvar_total"] = rvar_total(close).to_numpy()
-        g["idio_vol_3f"] = idio_vol_3f(close, spy_close, size_proxy, sector_close).to_numpy()
+        g["idio_vol_market"] = idio_vol_market(
+            close, spy_close, size_proxy, sector_close
+        ).to_numpy()
         out_blocks.append(g)
     return pd.concat(out_blocks, ignore_index=True)
 
@@ -192,7 +208,7 @@ __all__ = [
     "VOL_WINDOW",
     "add_track_b_features",
     "beta_dm",
-    "idio_vol_3f",
+    "idio_vol_market",
     "mom_carry_12_1",
     "rvar_total",
 ]
