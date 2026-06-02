@@ -31,7 +31,7 @@ Concrete stores (inherit / compose with this):
 
 Public API::
 
-    from kernel.data_cache import CachedStore
+    from renquant_base_data.loaders.data_cache import CachedStore
 
     store = CachedStore(
         cache_dir="data/intraday",
