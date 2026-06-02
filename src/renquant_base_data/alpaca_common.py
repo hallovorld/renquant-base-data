@@ -29,8 +29,14 @@ class TokenBucket:
 
 
 def load_strategy_watchlist(path: str | Path) -> list[str]:
+    """Read symbols from strategy_config.json's top-level ``watchlist`` field.
+
+    Other layouts such as ``symbols`` or ``data.watchlist`` are intentionally
+    not accepted here; Alpaca refresh callers share one production config
+    schema, and silent fallback between schemas can mask typos.
+    """
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    values = payload.get("watchlist") or payload.get("symbols") or payload.get("data", {}).get("watchlist")
+    values = payload.get("watchlist")
     if not values:
-        raise ValueError(f"watchlist is empty or missing in {path}")
+        raise ValueError(f"strategy_config missing top-level 'watchlist': {path}")
     return [str(symbol).upper() for symbol in values if symbol and str(symbol) != "-"]

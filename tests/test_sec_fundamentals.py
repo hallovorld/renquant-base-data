@@ -12,10 +12,25 @@ from renquant_base_data.sec_fundamentals import (
     build_quarterly_panel,
     main,
     refresh_sec_fundamentals,
+    sec_headers,
 )
 
 
 pytest.importorskip("pyarrow")
+
+
+def test_sec_headers_use_env_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SEC_USER_AGENT", "RenQuant ops@example.com")
+
+    assert sec_headers()["User-Agent"] == "RenQuant ops@example.com"
+
+
+def test_sec_headers_fallback_has_no_personal_email(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SEC_USER_AGENT", raising=False)
+
+    user_agent = sec_headers()["User-Agent"]
+    assert user_agent == "renquant-base-data sec-edgar-contact@invalid.example"
+    assert "renhao.overflow@gmail.com" not in user_agent
 
 
 def _raw_fixture() -> pd.DataFrame:

@@ -16,6 +16,10 @@ make doctor
 This repo tracks data contracts, fingerprints, schemas, and object locations.
 It does not store large parquet/zip/database files in normal Git.
 
+SEC EDGAR refresh jobs must set `SEC_USER_AGENT` to an operator contact string,
+for example `RenQuant ops@example.com`. If unset, the package uses a generic
+library identifier instead of a personal email.
+
 ## Pipeline Rule
 
 Data validation and materialization workflows are `renquant-common`

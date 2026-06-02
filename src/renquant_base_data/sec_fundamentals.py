@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,7 +31,8 @@ from renquant_common.net_safety import FetchBudget, call_with_timeout
 
 log = logging.getLogger("renquant_base_data.sec_fundamentals")
 
-SEC_HEADERS = {"User-Agent": "RenQuant renhao.overflow@gmail.com"}
+SEC_USER_AGENT_ENV = "SEC_USER_AGENT"
+DEFAULT_SEC_USER_AGENT = "renquant-base-data sec-edgar-contact@invalid.example"
 FRAMES_BASE = "https://data.sec.gov/api/xbrl/frames"
 TICKER_CIK_URL = "https://www.sec.gov/files/company_tickers.json"
 DEFAULT_START_YEAR = 2010
@@ -77,6 +79,10 @@ class _MissingFrame:
 
 
 MISSING_FRAME = _MissingFrame()
+
+
+def sec_headers() -> dict[str, str]:
+    return {"User-Agent": os.environ.get(SEC_USER_AGENT_ENV, DEFAULT_SEC_USER_AGENT)}
 
 
 @dataclass(frozen=True)
@@ -161,7 +167,7 @@ def _download_frame_json(
     client = session or requests
     response = client.get(
         f"{FRAMES_BASE}/{taxonomy}/{concept}/{unit}/{period}.json",
-        headers=SEC_HEADERS,
+        headers=sec_headers(),
         timeout=30,
     )
     if response.status_code == 404:
@@ -247,7 +253,7 @@ def fetch_all_concepts(
 
 def _download_ticker_map(*, session: requests.Session | None) -> dict[str, Any]:
     client = session or requests
-    response = client.get(TICKER_CIK_URL, headers=SEC_HEADERS, timeout=30)
+    response = client.get(TICKER_CIK_URL, headers=sec_headers(), timeout=30)
     response.raise_for_status()
     return response.json()
 
@@ -655,7 +661,13 @@ def refresh_sec_fundamentals(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0],
+        epilog=(
+            "SEC EDGAR requests identify with SEC_USER_AGENT. "
+            f"Set {SEC_USER_AGENT_ENV}='RenQuant ops@example.com' in production."
+        ),
+    )
     parser.add_argument("--mode", choices=["daily", "extended", "both"], default="both")
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--universe", type=Path, default=None)
