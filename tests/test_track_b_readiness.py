@@ -15,7 +15,11 @@ from renquant_base_data.track_b_readiness import (
 
 
 def _manifest_json() -> dict:
-    path = Path(__file__).parents[1] / "manifests" / "track-b-bull-calm-feature-readiness.json"
+    path = (
+        Path(__file__).parents[1]
+        / "manifests"
+        / "track-b-bull-calm-feature-readiness.json"
+    )
     return json.loads(path.read_text())
 
 
@@ -26,7 +30,10 @@ def test_track_b_readiness_manifest_matches_code_constants() -> None:
     assert manifest["target"] == TRACK_B_WF_TARGET
     assert tuple(manifest["required_features"]) == TRACK_B_FEATURES
     assert manifest["long_training"] is False
-    assert tuple(TRACK_B_BULL_CALM_FEATURE_MANIFEST["required_features"]) == TRACK_B_FEATURES
+    assert (
+        tuple(TRACK_B_BULL_CALM_FEATURE_MANIFEST["required_features"])
+        == TRACK_B_FEATURES
+    )
 
 
 def test_track_b_readiness_checklist_has_required_slugs() -> None:

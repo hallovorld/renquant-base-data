@@ -20,7 +20,10 @@ TRACK_B_WF_TARGET = "BULL_CALM Track B full WF retrain"
 TRACK_B_READINESS_CHECKLIST: tuple[dict[str, str], ...] = (
     {
         "slug": "feature_builders_registered",
-        "description": "Track B feature builders are importable from renquant_base_data.track_b_features.",
+        "description": (
+            "Track B feature builders are importable from "
+            "renquant_base_data.track_b_features."
+        ),
     },
     {
         "slug": "manifest_features_match_code",
@@ -28,11 +31,17 @@ TRACK_B_READINESS_CHECKLIST: tuple[dict[str, str], ...] = (
     },
     {
         "slug": "candidate_panel_contains_required_columns",
-        "description": "The retrain candidate panel contains mom_carry_12_1, beta_dm, rvar_total, and idio_vol_market.",
+        "description": (
+            "The retrain candidate panel contains mom_carry_12_1, beta_dm, "
+            "rvar_total, and idio_vol_market."
+        ),
     },
     {
         "slug": "no_long_training_in_base_data",
-        "description": "This repo only validates feature readiness; full WF retrain runs in the strategy repo.",
+        "description": (
+            "This repo only validates feature readiness; full WF retrain runs "
+            "in the strategy repo."
+        ),
     },
 )
 
@@ -42,7 +51,10 @@ TRACK_B_BULL_CALM_FEATURE_MANIFEST: dict[str, Any] = {
     "target": TRACK_B_WF_TARGET,
     "required_features": list(TRACK_B_FEATURES),
     "source_module": "renquant_base_data.track_b_features",
-    "validation_entrypoint": "python -m renquant_base_data.track_b_readiness --columns <feature columns>",
+    "validation_entrypoint": (
+        "python -m renquant_base_data.track_b_readiness "
+        "--columns <feature columns>"
+    ),
     "long_training": False,
     "checklist": list(TRACK_B_READINESS_CHECKLIST),
 }
@@ -58,7 +70,9 @@ def validate_track_b_feature_readiness(
     Returns a JSON-serializable report instead of raising, so callers can use
     it in CI, notebooks, or preflight logs.
     """
-    manifest_in = manifest if manifest is not None else TRACK_B_BULL_CALM_FEATURE_MANIFEST
+    manifest_in = (
+        manifest if manifest is not None else TRACK_B_BULL_CALM_FEATURE_MANIFEST
+    )
     column_set = {str(col) for col in columns}
     manifest_features = tuple(str(f) for f in manifest_in.get("required_features", ()))
     checklist = manifest_in.get("checklist", ())
@@ -69,9 +83,15 @@ def validate_track_b_feature_readiness(
     }
     required_slugs = {item["slug"] for item in TRACK_B_READINESS_CHECKLIST}
 
-    missing_features = [feature for feature in TRACK_B_FEATURES if feature not in column_set]
-    manifest_missing = [feature for feature in TRACK_B_FEATURES if feature not in manifest_features]
-    manifest_extra = [feature for feature in manifest_features if feature not in TRACK_B_FEATURES]
+    missing_features = [
+        feature for feature in TRACK_B_FEATURES if feature not in column_set
+    ]
+    manifest_missing = [
+        feature for feature in TRACK_B_FEATURES if feature not in manifest_features
+    ]
+    manifest_extra = [
+        feature for feature in manifest_features if feature not in TRACK_B_FEATURES
+    ]
     missing_checklist = sorted(required_slugs - checklist_slugs)
     schema_ok = manifest_in.get("schema_version") == TRACK_B_READINESS_SCHEMA_VERSION
     target_ok = manifest_in.get("target") == TRACK_B_WF_TARGET
@@ -91,7 +111,9 @@ def validate_track_b_feature_readiness(
         "target": TRACK_B_WF_TARGET,
         "required_features": list(TRACK_B_FEATURES),
         "missing_features": missing_features,
-        "present_features": [feature for feature in TRACK_B_FEATURES if feature in column_set],
+        "present_features": [
+            feature for feature in TRACK_B_FEATURES if feature in column_set
+        ],
         "manifest_missing_features": manifest_missing,
         "manifest_extra_features": manifest_extra,
         "missing_checklist_slugs": missing_checklist,
