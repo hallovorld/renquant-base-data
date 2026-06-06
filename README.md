@@ -25,6 +25,18 @@ library identifier instead of a personal email.
 Data validation and materialization workflows are `renquant-common`
 Task/Job/Pipeline chains.
 
+## Track B Feature Readiness
+
+The BULL_CALM Track B feature-readiness manifest lives at
+`manifests/track-b-bull-calm-feature-readiness.json`. It checks only the
+required feature surface for full WF retrain readiness; it does not run
+training.
+
+```bash
+PYTHONPATH=../renquant-common/src:src python -m renquant_base_data.track_b_readiness \
+  --columns mom_carry_12_1 beta_dm rvar_total idio_vol_market
+```
+
 ## Initial Split Source
 
 `hallovorld/RenQuant` commit
