@@ -1,0 +1,32 @@
+{
+  "manifest_id": "track-b-bull-calm-feature-readiness",
+  "schema_version": "track-b-feature-readiness-v1",
+  "target": "BULL_CALM Track B full WF retrain",
+  "required_features": [
+    "mom_carry_12_1",
+    "beta_dm",
+    "rvar_total",
+    "idio_vol_market"
+  ],
+  "source_module": "renquant_base_data.track_b_features",
+  "validation_entrypoint": "python -m renquant_base_data.track_b_readiness --columns <feature columns>",
+  "long_training": false,
+  "checklist": [
+    {
+      "slug": "feature_builders_registered",
+      "description": "Track B feature builders are importable from renquant_base_data.track_b_features."
+    },
+    {
+      "slug": "manifest_features_match_code",
+      "description": "The readiness manifest required_features exactly matches TRACK_B_FEATURES."
+    },
+    {
+      "slug": "candidate_panel_contains_required_columns",
+      "description": "The retrain candidate panel contains mom_carry_12_1, beta_dm, rvar_total, and idio_vol_market."
+    },
+    {
+      "slug": "no_long_training_in_base_data",
+      "description": "This repo only validates feature readiness; full WF retrain runs in the strategy repo."
+    }
+  ]
+}
