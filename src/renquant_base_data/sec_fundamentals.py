@@ -134,10 +134,17 @@ def resolve_alpha_path(data_dir: str | Path, alpha_path: str | Path | None = Non
     if alpha_path is not None:
         return Path(alpha_path).expanduser().resolve()
     data_dir = Path(data_dir).expanduser().resolve()
-    for name in DEFAULT_ALPHA_CANDIDATES:
-        candidate = data_dir / name
-        if candidate.exists():
-            return candidate
+    # 2026-06-12 staleness fix: pick the FRESHEST existing candidate (by
+    # mtime), not the first-listed. Pre-fix, an abandoned
+    # alpha158_816_dataset.parquet (last built 2026-05-07, dates ending
+    # 2026-02-10) shadowed the daily-rebuilt alpha158_qlib_dataset.parquet,
+    # silently clipping the sec_fundamentals_daily date axis 121 days into
+    # the past — the live pipeline then warned "fundamentals feed STALE"
+    # every run even though the SEC refresh itself was working.
+    existing = [data_dir / name for name in DEFAULT_ALPHA_CANDIDATES
+                if (data_dir / name).exists()]
+    if existing:
+        return max(existing, key=lambda p: p.stat().st_mtime)
     return data_dir / DEFAULT_ALPHA_CANDIDATES[0]
 
 
