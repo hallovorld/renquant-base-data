@@ -9,7 +9,10 @@ from __future__ import annotations
 import os
 import time
 
-from renquant_base_data.sec_fundamentals import resolve_alpha_path, DEFAULT_ALPHA_CANDIDATES
+from renquant_base_data.sec_fundamentals import (
+    DEFAULT_ALPHA_CANDIDATES,
+    resolve_alpha_path,
+)
 
 
 def test_prefers_freshest_candidate(tmp_path):
@@ -19,7 +22,7 @@ def test_prefers_freshest_candidate(tmp_path):
     new.write_bytes(b"new")
     past = time.time() - 86400 * 30
     os.utime(old, (past, past))
-    assert resolve_alpha_path(tmp_path) == new.resolve() or resolve_alpha_path(tmp_path).name == new.name
+    assert resolve_alpha_path(tmp_path) == new.resolve()
 
 
 def test_explicit_path_still_wins(tmp_path):
