@@ -7,6 +7,7 @@ import pandas as pd
 from renquant_base_data.fetchers.fmp_analyst_ratings import (
     FETCH_ERROR,
     NO_COVERAGE,
+    PREMIUM_RESTRICTED,
     QUOTA_ERROR,
     SOURCE,
     WITH_DATA,
@@ -62,6 +63,19 @@ def test_fetch_status_distinguishes_coverage_quota_and_error():
                                    getter=lambda t: (_ for _ in ()).throw(ValueError("net")))
     assert boom.status == FETCH_ERROR
     assert fetch_grades_historical("AAPL", "k", getter=lambda t: None).status == FETCH_ERROR
+
+
+def test_fetch_premium_402_is_restricted_not_error():
+    # FMP free tier returns a 402 plain-text "Special Endpoint" body for symbols
+    # outside the free set — a PERMANENT plan lock, must NOT be a fetch_error.
+    body = ("Premium Query Parameter: 'Special Endpoint : This value set for "
+            "'symbol' is not available under your current subscription please "
+            "visit our subscription page to upgrade your plan")
+    res = fetch_grades_historical("ADI", "k", getter=lambda t: body)
+    assert res.status == PREMIUM_RESTRICTED and res.frame.empty
+    # premium ranks ahead of the "upgrade"/quota hints it also contains
+    assert fetch_grades_historical(
+        "ADI", "k", getter=lambda t: {"Error Message": body}).status == PREMIUM_RESTRICTED
 
 
 def test_parse_grades_stamps_source_provenance():
@@ -146,6 +160,26 @@ def test_refresh_buckets_quota_separately_from_no_coverage(tmp_path):
     assert s["with_data"] == 1 and s["no_coverage"] == 1
     assert s["quota_error"] == 1 and s["errors_total"] == 1
     assert s["coverage_pct"] == round(100 / 3, 1)
+
+
+def test_refresh_premium_excluded_from_errors_and_coverage_denom(tmp_path):
+    # premium-locked names are the plan ceiling: not errors, not in the coverage
+    # denominator (coverage = with_data / coverable, coverable = requested − premium)
+    from renquant_base_data import fmp_analyst_ratings_refresh as R
+    out = tmp_path / "r.parquet"
+    prem = "Special Endpoint not available under your current subscription"
+    def getter(t):
+        if t in ("AAPL", "MSFT"):
+            return _payload()      # 2 with_data
+        return prem                # 3 premium-locked
+    s = R.refresh_fmp_ratings(watchlist=["AAPL", "MSFT", "ADI", "AEP", "AFRM"],
+                              output=out, api_key="k", sleep_sec=0, max_pull=0,
+                              asof=pd.Timestamp("2026-06-24"), getter=getter)
+    assert s["with_data"] == 2 and s["premium_restricted"] == 3
+    assert s["errors_total"] == 0          # premium is NOT an error
+    assert s["coverable"] == 2 and s["coverage_pct"] == 100.0
+    # so a premium-heavy run passes both gates cleanly
+    assert R.evaluate_gates(s, min_coverage_pct=90.0, fail_on_error=True) == []
 
 
 def test_evaluate_gates_fail_on_error_and_min_coverage():

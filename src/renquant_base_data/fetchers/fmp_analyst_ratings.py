@@ -32,10 +32,18 @@ RATING_COLS = ("analystRatingsStrongBuy", "analystRatingsBuy", "analystRatingsHo
 # silently collapsed into "this ticker has no ratings" (Codex #24 finding #1).
 WITH_DATA = "with_data"      # got rating rows
 NO_COVERAGE = "no_coverage"  # valid empty response: ticker genuinely has no grades
-QUOTA_ERROR = "quota_error"  # free-tier 429 / "limit reached" / upgrade-required
+QUOTA_ERROR = "quota_error"  # free-tier 429 / "limit reached" (TRANSIENT — retry later)
 FETCH_ERROR = "fetch_error"  # bad key, schema change, network/JSON failure
-_QUOTA_HINTS = ("limit reach", "limit reached", "upgrade", "quota", "429",
-                "too many requests", "rate limit", "exceeded")
+# PERMANENT plan ceiling, NOT a transient error: FMP free BASIC returns HTTP 402
+# "Special Endpoint … not available under your current subscription" for symbols
+# outside the free set (~70% of a large-cap watchlist, verified 2026-06-24). It
+# can never be retried into success on this plan, so it is bucketed apart from
+# the retryable errors and never counts against the error gate.
+PREMIUM_RESTRICTED = "premium_restricted"
+_QUOTA_HINTS = ("limit reach", "limit reached", "too many requests", "rate limit",
+                "429", "quota", "exceeded")
+_PREMIUM_HINTS = ("special endpoint", "not available under your current subscription",
+                  "premium", "upgrade your plan")
 
 
 class FetchResult(NamedTuple):
@@ -82,10 +90,16 @@ def parse_grades(ticker: str, payload: Any, asof=None) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
 
 
-def _classify_error(detail: str) -> str:
-    """Quota/rate-limit vs. generic fetch error, from the message text."""
-    low = detail.lower()
-    return QUOTA_ERROR if any(h in low for h in _QUOTA_HINTS) else FETCH_ERROR
+def _classify_text(detail: str, status_code: "int | None" = None) -> str:
+    """Map an error body / HTTP status to a status. PERMANENT plan locks
+    (402 / "Special Endpoint") rank ahead of transient quota/rate hints so an
+    upgrade-required symbol is never retried forever as a quota_error."""
+    low = (detail or "").lower()
+    if status_code == 402 or any(h in low for h in _PREMIUM_HINTS):
+        return PREMIUM_RESTRICTED
+    if status_code == 429 or any(h in low for h in _QUOTA_HINTS):
+        return QUOTA_ERROR
+    return FETCH_ERROR
 
 
 def fetch_grades_historical(ticker: str, api_key: str, *, timeout: float = 20.0,
@@ -93,26 +107,40 @@ def fetch_grades_historical(ticker: str, api_key: str, *, timeout: float = 20.0,
     """One ticker's full rating history as a :class:`FetchResult` (frame + status).
 
     Never raises. The status DISTINGUISHES an empty-but-valid response
-    (``no_coverage``) from a quota hit (``quota_error``) or any other failure
-    (``fetch_error``) so the refresh layer can fail-closed instead of mistaking a
-    429 for "this ticker has no ratings". ``getter`` injectable for tests."""
+    (``no_coverage``), a permanent plan lock (``premium_restricted`` — FMP free
+    402 "Special Endpoint"), a transient quota hit (``quota_error``), and any
+    other failure (``fetch_error``), so the refresh layer can fail-closed on real
+    errors while treating the plan ceiling as expected. ``getter`` injectable for
+    tests (return a list, an ``{"Error Message": ...}`` dict, or a raw error
+    string to exercise each branch)."""
     empty = parse_grades(ticker, None, asof=asof)
     try:
         if getter is None:
             import requests  # noqa: PLC0415
             resp = requests.get(GRADES_URL, params={"symbol": ticker, "apikey": api_key},
                                 timeout=timeout)
-            payload = resp.json()
+            try:
+                payload = resp.json()
+            except Exception:  # noqa: BLE001 — FMP 402/429 return a plain-text body
+                st = _classify_text(resp.text, resp.status_code)
+                log.warning("fmp grades %s for %s: HTTP %s %s",
+                            st, ticker, resp.status_code, (resp.text or "")[:120])
+                return FetchResult(empty, st, (resp.text or "")[:160])
         else:
             payload = getter(ticker)
     except Exception as exc:  # noqa: BLE001
         log.warning("fmp grades fetch failed for %s: %s", ticker, exc)
         return FetchResult(empty, FETCH_ERROR, str(exc)[:160])
-    # FMP signals quota/restriction/bad-key as a dict with an Error Message
+    # FMP can also signal restriction/quota as a dict {"Error Message": ...} or a
+    # raw string (injected getter) — classify, don't treat as data.
+    if isinstance(payload, str):
+        st = _classify_text(payload)
+        log.warning("fmp grades %s for %s: %s", st, ticker, payload[:120])
+        return FetchResult(empty, st, payload[:160])
     if isinstance(payload, dict) and any(k.lower().startswith(("error", "message"))
                                          for k in payload):
         detail = str(payload)[:160]
-        status = _classify_error(detail)
+        status = _classify_text(detail)
         log.warning("fmp grades %s for %s: %s", status, ticker, detail)
         return FetchResult(empty, status, detail)
     if not isinstance(payload, list):
