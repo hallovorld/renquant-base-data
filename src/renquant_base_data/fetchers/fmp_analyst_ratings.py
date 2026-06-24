@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -24,8 +24,27 @@ import pandas as pd
 log = logging.getLogger("kernel.fmp_analyst_ratings")
 
 GRADES_URL = "https://financialmodelingprep.com/stable/grades-historical"
+SOURCE = "fmp_grades_historical"  # provenance stamp on every persisted row
 RATING_COLS = ("analystRatingsStrongBuy", "analystRatingsBuy", "analystRatingsHold",
                "analystRatingsSell", "analystRatingsStrongSell")
+
+# Per-ticker fetch outcomes — kept DISTINCT so a quota/API failure can never be
+# silently collapsed into "this ticker has no ratings" (Codex #24 finding #1).
+WITH_DATA = "with_data"      # got rating rows
+NO_COVERAGE = "no_coverage"  # valid empty response: ticker genuinely has no grades
+QUOTA_ERROR = "quota_error"  # free-tier 429 / "limit reached" / upgrade-required
+FETCH_ERROR = "fetch_error"  # bad key, schema change, network/JSON failure
+_QUOTA_HINTS = ("limit reach", "limit reached", "upgrade", "quota", "429",
+                "too many requests", "rate limit", "exceeded")
+
+
+class FetchResult(NamedTuple):
+    """One ticker's pull: the parsed frame PLUS a non-collapsible status so the
+    caller can gate on coverage vs. error (never treat a 429 as 'no data')."""
+
+    frame: pd.DataFrame
+    status: str
+    detail: str = ""
 
 
 def consensus_score(sb, b, h, s, ss) -> "tuple[float, int]":
@@ -38,13 +57,15 @@ def consensus_score(sb, b, h, s, ss) -> "tuple[float, int]":
     return (2 * sb + b - s - 2 * ss) / total, total
 
 
-_COLS = ["ticker", "date", *RATING_COLS, "consensus", "n_analysts", "fetched_at"]
+_COLS = ["ticker", "date", *RATING_COLS, "consensus", "n_analysts",
+         "source", "fetched_at"]
 
 
 def parse_grades(ticker: str, payload: Any, asof=None) -> pd.DataFrame:
-    """FMP grades-historical JSON → tidy frame. ``fetched_at`` stamps WHEN we
-    pulled it (the staleness key for incremental refresh), distinct from the
-    rating-month ``date``."""
+    """FMP grades-historical JSON → tidy frame. ``source`` stamps the vendor
+    endpoint and ``fetched_at`` stamps WHEN we pulled it (the staleness key for
+    incremental refresh), distinct from the rating-month ``date`` — together they
+    give every row auditable provenance (Codex #24 finding #3)."""
     fetched = (pd.Timestamp(asof).normalize() if asof is not None
                else pd.Timestamp.today().normalize())
     if not isinstance(payload, list) or not payload:
@@ -56,14 +77,26 @@ def parse_grades(ticker: str, payload: Any, asof=None) -> pd.DataFrame:
         sc, n = consensus_score(*(r.get(c) for c in RATING_COLS))
         rows.append({"ticker": ticker, "date": pd.to_datetime(r["date"]),
                      **{c: int(r.get(c, 0) or 0) for c in RATING_COLS},
-                     "consensus": sc, "n_analysts": n, "fetched_at": fetched})
+                     "consensus": sc, "n_analysts": n,
+                     "source": SOURCE, "fetched_at": fetched})
     return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
 
 
+def _classify_error(detail: str) -> str:
+    """Quota/rate-limit vs. generic fetch error, from the message text."""
+    low = detail.lower()
+    return QUOTA_ERROR if any(h in low for h in _QUOTA_HINTS) else FETCH_ERROR
+
+
 def fetch_grades_historical(ticker: str, api_key: str, *, timeout: float = 20.0,
-                            asof=None, getter: Callable[..., Any] | None = None) -> pd.DataFrame:
-    """One ticker's full rating history. ``getter`` injectable for tests.
-    Returns empty frame on any error (never raises)."""
+                            asof=None, getter: Callable[..., Any] | None = None) -> FetchResult:
+    """One ticker's full rating history as a :class:`FetchResult` (frame + status).
+
+    Never raises. The status DISTINGUISHES an empty-but-valid response
+    (``no_coverage``) from a quota hit (``quota_error``) or any other failure
+    (``fetch_error``) so the refresh layer can fail-closed instead of mistaking a
+    429 for "this ticker has no ratings". ``getter`` injectable for tests."""
+    empty = parse_grades(ticker, None, asof=asof)
     try:
         if getter is None:
             import requests  # noqa: PLC0415
@@ -72,14 +105,24 @@ def fetch_grades_historical(ticker: str, api_key: str, *, timeout: float = 20.0,
             payload = resp.json()
         else:
             payload = getter(ticker)
-        # surface quota/restriction as a signal, not data
-        if isinstance(payload, dict) and any(k.lower().startswith(("error", "message"))
-                                             for k in payload):
-            raise RuntimeError(str(payload)[:120])
-        return parse_grades(ticker, payload, asof=asof)
     except Exception as exc:  # noqa: BLE001
         log.warning("fmp grades fetch failed for %s: %s", ticker, exc)
-        return parse_grades(ticker, None, asof=asof)
+        return FetchResult(empty, FETCH_ERROR, str(exc)[:160])
+    # FMP signals quota/restriction/bad-key as a dict with an Error Message
+    if isinstance(payload, dict) and any(k.lower().startswith(("error", "message"))
+                                         for k in payload):
+        detail = str(payload)[:160]
+        status = _classify_error(detail)
+        log.warning("fmp grades %s for %s: %s", status, ticker, detail)
+        return FetchResult(empty, status, detail)
+    if not isinstance(payload, list):
+        detail = f"unexpected payload type {type(payload).__name__}"
+        log.warning("fmp grades fetch_error for %s: %s", ticker, detail)
+        return FetchResult(empty, FETCH_ERROR, detail)
+    frame = parse_grades(ticker, payload, asof=asof)
+    if len(frame):
+        return FetchResult(frame, WITH_DATA)
+    return FetchResult(frame, NO_COVERAGE)
 
 
 @dataclass

@@ -16,6 +16,9 @@ import time
 from pathlib import Path
 
 from renquant_base_data.fetchers.fmp_analyst_ratings import (
+    NO_COVERAGE,
+    QUOTA_ERROR,
+    WITH_DATA,
     FmpRatingsStore,
     fetch_grades_historical,
 )
@@ -55,26 +58,65 @@ def select_to_refresh(watchlist: list[str], existing, max_pull: int | None,
 def refresh_fmp_ratings(*, watchlist: list[str], output: str | Path, api_key: str,
                         sleep_sec: float = 1.0, max_pull: int | None = None,
                         asof=None, getter=None) -> dict:
+    """Pull this run's batch and upsert. The summary buckets each ticker by
+    OUTCOME — ``with_data`` / ``no_coverage`` / ``quota_error`` / ``fetch_error``
+    — so a 429 or schema break is never silently counted as 'no ratings'
+    (Codex #24 finding #1+#2). Gate evaluation (coverage %, fail-on-error) lives
+    in ``main`` so the dict stays a pure artifact."""
     import pandas as pd  # noqa: PLC0415
     asof = pd.Timestamp(asof).normalize() if asof is not None else pd.Timestamp.today().normalize()
     store = FmpRatingsStore(Path(output))
     todo = select_to_refresh(watchlist, store.load(), max_pull, asof)
-    frames, ok, empty = [], 0, 0
+    frames: list = []
+    buckets: dict[str, int] = {}
+    errors: list[str] = []
     for i, t in enumerate(todo):
-        f = fetch_grades_historical(t, api_key, asof=asof, getter=getter)
-        if len(f):
-            frames.append(f); ok += 1
-        else:
-            empty += 1
+        res = fetch_grades_historical(t, api_key, asof=asof, getter=getter)
+        buckets[res.status] = buckets.get(res.status, 0) + 1
+        if res.status == WITH_DATA:
+            frames.append(res.frame)
+        elif res.status not in (WITH_DATA, NO_COVERAGE):
+            errors.append(f"{t}:{res.status}")
         if sleep_sec and i < len(todo) - 1:
             time.sleep(sleep_sec)
     df = store.upsert(frames)
-    summary = {"watchlist": len(watchlist), "pulled_this_run": len(todo),
-               "with_data": ok, "empty": empty, "total_rows": int(len(df)),
-               "tickers_in_store": int(df["ticker"].nunique()) if len(df) else 0,
-               "output": str(output)}
+    requested = len(todo)
+    with_data = buckets.get(WITH_DATA, 0)
+    fetch_err = sum(v for k, v in buckets.items()
+                    if k not in (WITH_DATA, NO_COVERAGE))
+    summary = {
+        "watchlist": len(watchlist), "requested": requested,
+        "pulled_this_run": requested,  # back-compat alias
+        "with_data": with_data, "no_coverage": buckets.get(NO_COVERAGE, 0),
+        "quota_error": buckets.get(QUOTA_ERROR, 0),
+        "fetch_error": fetch_err - buckets.get(QUOTA_ERROR, 0),
+        "errors_total": fetch_err,
+        "empty": buckets.get(NO_COVERAGE, 0) + fetch_err,  # back-compat alias
+        "coverage_pct": round(100.0 * with_data / requested, 1) if requested else 0.0,
+        "total_rows": int(len(df)),
+        "tickers_in_store": int(df["ticker"].nunique()) if len(df) else 0,
+        "error_samples": errors[:10],
+        "source": "fmp_grades_historical", "output": str(output),
+    }
     log.info("fmp ratings refresh: %s", summary)
     return summary
+
+
+def evaluate_gates(summary: dict, *, min_coverage_pct: float,
+                   fail_on_error: bool) -> list[str]:
+    """Return a list of gate VIOLATIONS (empty == pass). Lets the run prove it is
+    valid for the confirmation backtest instead of silently accepting partial or
+    error-degraded coverage."""
+    violations: list[str] = []
+    if fail_on_error and summary.get("errors_total", 0) > 0:
+        violations.append(
+            f"{summary['errors_total']} fetch/quota error(s): "
+            f"{summary.get('error_samples')}")
+    if summary.get("coverage_pct", 0.0) < min_coverage_pct:
+        violations.append(
+            f"coverage {summary.get('coverage_pct')}% < required {min_coverage_pct}% "
+            f"({summary.get('with_data')}/{summary.get('requested')} with data)")
+    return violations
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -86,6 +128,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-pull", type=int, default=40,
                    help="incremental: pull only the N most-stale/missing tickers "
                         "this run (daily cron rotates the watchlist). 0 = all.")
+    p.add_argument("--min-coverage-pct", type=float, default=0.0,
+                   help="exit non-zero if with_data/requested falls below this %% "
+                        "(pre-registers the coverage bar for a valid run).")
+    p.add_argument("--fail-on-error", action="store_true",
+                   help="exit non-zero if ANY ticker hit a quota/fetch error "
+                        "(so a 429 or schema break can't pass as 'no coverage').")
     return p
 
 
@@ -98,7 +146,14 @@ def main(argv: list[str] | None = None) -> int:
     summary = refresh_fmp_ratings(
         watchlist=load_watchlist(args.watchlist), output=args.output,
         api_key=key, sleep_sec=args.sleep_sec, max_pull=args.max_pull)
+    violations = evaluate_gates(summary, min_coverage_pct=args.min_coverage_pct,
+                                fail_on_error=args.fail_on_error)
+    summary["gate_violations"] = violations
     print(json.dumps(summary))
+    if violations:
+        for v in violations:
+            log.error("gate failed: %s", v)
+        return 1
     return 0
 
 
