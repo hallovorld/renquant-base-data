@@ -38,10 +38,17 @@ def consensus_score(sb, b, h, s, ss) -> "tuple[float, int]":
     return (2 * sb + b - s - 2 * ss) / total, total
 
 
-def parse_grades(ticker: str, payload: Any) -> pd.DataFrame:
-    """FMP grades-historical JSON → tidy frame (date, counts, consensus, n)."""
+_COLS = ["ticker", "date", *RATING_COLS, "consensus", "n_analysts", "fetched_at"]
+
+
+def parse_grades(ticker: str, payload: Any, asof=None) -> pd.DataFrame:
+    """FMP grades-historical JSON → tidy frame. ``fetched_at`` stamps WHEN we
+    pulled it (the staleness key for incremental refresh), distinct from the
+    rating-month ``date``."""
+    fetched = (pd.Timestamp(asof).normalize() if asof is not None
+               else pd.Timestamp.today().normalize())
     if not isinstance(payload, list) or not payload:
-        return pd.DataFrame(columns=["ticker", "date", *RATING_COLS, "consensus", "n_analysts"])
+        return pd.DataFrame(columns=_COLS)
     rows = []
     for r in payload:
         if not isinstance(r, dict) or "date" not in r:
@@ -49,12 +56,12 @@ def parse_grades(ticker: str, payload: Any) -> pd.DataFrame:
         sc, n = consensus_score(*(r.get(c) for c in RATING_COLS))
         rows.append({"ticker": ticker, "date": pd.to_datetime(r["date"]),
                      **{c: int(r.get(c, 0) or 0) for c in RATING_COLS},
-                     "consensus": sc, "n_analysts": n})
+                     "consensus": sc, "n_analysts": n, "fetched_at": fetched})
     return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
 
 
 def fetch_grades_historical(ticker: str, api_key: str, *, timeout: float = 20.0,
-                            getter: Callable[..., Any] | None = None) -> pd.DataFrame:
+                            asof=None, getter: Callable[..., Any] | None = None) -> pd.DataFrame:
     """One ticker's full rating history. ``getter`` injectable for tests.
     Returns empty frame on any error (never raises)."""
     try:
@@ -69,10 +76,10 @@ def fetch_grades_historical(ticker: str, api_key: str, *, timeout: float = 20.0,
         if isinstance(payload, dict) and any(k.lower().startswith(("error", "message"))
                                              for k in payload):
             raise RuntimeError(str(payload)[:120])
-        return parse_grades(ticker, payload)
+        return parse_grades(ticker, payload, asof=asof)
     except Exception as exc:  # noqa: BLE001
         log.warning("fmp grades fetch failed for %s: %s", ticker, exc)
-        return parse_grades(ticker, None)
+        return parse_grades(ticker, None, asof=asof)
 
 
 @dataclass
@@ -84,7 +91,7 @@ class FmpRatingsStore:
     def load(self) -> pd.DataFrame:
         if Path(self.path).exists():
             return pd.read_parquet(self.path)
-        return pd.DataFrame(columns=["ticker", "date", *RATING_COLS, "consensus", "n_analysts"])
+        return pd.DataFrame(columns=_COLS)
 
     def upsert(self, frames: list[pd.DataFrame]) -> pd.DataFrame:
         frames = [f for f in frames if f is not None and len(f)]
