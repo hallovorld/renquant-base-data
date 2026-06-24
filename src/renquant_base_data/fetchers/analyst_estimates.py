@@ -72,9 +72,11 @@ def _frac_change(curr, past) -> float:
 def fetch_analyst_snapshot(ticker: str, asof: pd.Timestamp,
                            ticker_factory: Callable[[str], Any] | None = None) -> dict:
     """One PIT snapshot row for ``ticker``. Defensive: any missing field → NaN."""
-    import yfinance as yf  # noqa: PLC0415
+    if ticker_factory is None:
+        import yfinance as yf  # noqa: PLC0415
+        ticker_factory = yf.Ticker
 
-    yt = (ticker_factory or yf.Ticker)(ticker)
+    yt = ticker_factory(ticker)
     row: dict[str, Any] = {"ticker": ticker, "asof": pd.Timestamp(asof).normalize()}
 
     # 1) recommendation consensus (latest month)
