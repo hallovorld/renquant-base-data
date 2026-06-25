@@ -67,5 +67,11 @@ def test_refresh_buckets_etf_as_no_coverage_not_error(tmp_path):
                                   api_key="k", sleep_sec=0, max_pull=0,
                                   asof=pd.Timestamp("2026-06-25"), getter=getter)
     assert s["with_data"] == 2 and s["no_coverage"] == 2
-    assert s["errors_total"] == 0                       # ETFs are NOT errors
-    assert s["coverable"] == 2 and s["coverage_pct"] == 100.0   # over coverable (non-ETF)
+    assert s["errors_total"] == 0                       # empty responses are NOT errors
+    assert s["coverable"] == 2 and s["coverage_pct"] == 100.0   # over coverable set
+    # honesty metrics (Codex #25): coverable cov reads 100% but only HALF the
+    # active watchlist actually returned data — the no_coverage gap stays visible
+    # (these names may be ETFs OR uncovered stocks; the fetcher can't tell).
+    assert s["active_coverage_pct"] == 50.0
+    assert s["no_coverage_pct"] == 50.0
+    assert set(s["no_coverage_samples"]) == {"SPY", "GLD"}
