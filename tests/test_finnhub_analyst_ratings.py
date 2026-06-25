@@ -164,3 +164,30 @@ def test_main_active_gate_trips_nonzero_on_widespread_empty(tmp_path, monkeypatc
     # the diagnostic coverable floor alone would NOT have caught it
     rc_ok = R.main(["--watchlist", "wl.json", "--min-coverage-pct", "90"])
     assert rc_ok == 0
+
+
+def test_main_min_coverage_pct_is_diagnostic_cannot_fail_run(tmp_path, monkeypatch):
+    """Codex #25 round 2: when coverable coverage_pct is BELOW a nonzero
+    --min-coverage-pct but --min-active-coverage-pct is satisfied (and no
+    --fail-on-error), the run must still succeed (rc=0) — the coverable metric is
+    diagnostic-only and can never change exit status."""
+    from renquant_base_data import finnhub_analyst_ratings_refresh as R
+    monkeypatch.setenv("FINNHUB_API_KEY", "k")
+    out = tmp_path / "r.parquet"
+    monkeypatch.setattr(R, "load_watchlist",
+                        lambda _p: ["AAPL", "MSFT", "GOOG", "TSLA", "NVDA"])
+
+    def getter(t):                                   # 3 with_data, 2 fetch_error, 0 no_cov
+        if t in ("TSLA", "NVDA"):
+            raise ValueError("vendor 500")
+        return _payload()
+    orig = R.refresh_finnhub_ratings
+    monkeypatch.setattr(
+        R, "refresh_finnhub_ratings",
+        lambda **kw: orig(**{**kw, "output": out, "sleep_sec": 0, "getter": getter}))
+    # coverage_pct = 3/5 = 60% (< 80 floor, breached); active = 3/5 = 60% (>= 50, ok).
+    # No --fail-on-error, so the 2 fetch_errors don't gate either. → rc MUST be 0.
+    rc = R.main(["--watchlist", "wl.json",
+                 "--min-coverage-pct", "80",            # diagnostic floor BREACHED
+                 "--min-active-coverage-pct", "50"])    # active gate satisfied
+    assert rc == 0

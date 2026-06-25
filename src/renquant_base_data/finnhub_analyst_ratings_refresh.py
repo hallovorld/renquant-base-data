@@ -121,11 +121,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "uncovered/vendor-empty) counts AGAINST it, so a mostly-"
                         "empty run cannot pass (Codex #25).")
     p.add_argument("--min-coverage-pct", type=float, default=0.0,
-                   help="DIAGNOSTIC ONLY (do NOT use as the safety gate): floors "
+                   help="DIAGNOSTIC ONLY — does NOT affect exit status. Compares "
                         "coverage_pct (with_data/coverable), which EXCLUDES the "
                         "ambiguous no_coverage bucket — 5/145 with_data still reads "
-                        "100%% coverable cov, so this cannot fail-close on a "
-                        "widespread-empty run. Use --min-active-coverage-pct.")
+                        "100%% coverable cov, so it cannot fail-close on a widespread-"
+                        "empty run and is NOT wired to rc. Use --min-active-coverage-pct "
+                        "(the only coverage fail-closed control).")
     p.add_argument("--fail-on-error", action="store_true")
     return p
 
@@ -139,14 +140,29 @@ def main(argv: list[str] | None = None) -> int:
     summary = refresh_finnhub_ratings(
         watchlist=load_watchlist(args.watchlist), output=args.output,
         api_key=key, sleep_sec=args.sleep_sec, max_pull=args.max_pull)
-    # active_coverage_pct (with_data/requested) is the fail-closed control: the
-    # ambiguous no_coverage bucket counts against it, so a mostly-empty run can't
-    # pass a floor that coverage_pct (over the coverable set) would read as 100%
-    # (Codex #25). --min-coverage-pct stays a diagnostic floor only.
-    violations = evaluate_gates(summary, min_coverage_pct=args.min_coverage_pct,
+    # The ONLY coverage-related fail-closed control for Finnhub is
+    # --min-active-coverage-pct (active_coverage_pct = with_data/requested), so the
+    # ambiguous no_coverage bucket counts against it; --fail-on-error is independent.
+    # --min-coverage-pct (coverable, excludes no_coverage) is DIAGNOSTIC ONLY and is
+    # NOT fed into the exit-status gate — passing it would let a widespread-empty run
+    # read 100%% coverable and silently pass (Codex #25 round 2). We hard-pass 0.0 so
+    # evaluate_gates never derives a coverable-floor violation for this caller.
+    violations = evaluate_gates(summary, min_coverage_pct=0.0,
                                 fail_on_error=args.fail_on_error,
                                 min_active_coverage_pct=args.min_active_coverage_pct)
     summary["gate_violations"] = violations
+    # Diagnostic-only comparison of the coverable metric — logged, recorded, but it
+    # can NEVER change rc.
+    if args.min_coverage_pct > 0:
+        cov = summary.get("coverage_pct", 0.0)
+        below = cov < args.min_coverage_pct
+        summary["coverage_pct_diagnostic"] = {
+            "coverage_pct": cov, "floor": args.min_coverage_pct,
+            "below_floor": below, "note": "diagnostic only — does not affect exit status"}
+        if below:
+            log.info("DIAGNOSTIC (not a gate): coverable coverage_pct %.1f%% < %.1f%% "
+                     "— ignored for exit status; --min-active-coverage-pct is the gate",
+                     cov, args.min_coverage_pct)
     print(json.dumps(summary))
     if violations:
         for v in violations:
