@@ -1,16 +1,18 @@
 """Finnhub analyst recommendation trends (free ``/stock/recommendation``).
 
 Finnhub's free tier exposes monthly analyst recommendation distributions
-(strongBuy/buy/hold/sell/strongSell), ~4 months per US stock, with **FULL stock
-coverage** — unlike FMP free's ~30% plan-lock (HTTP 402). One call per ticker;
-free tier is 60 calls/min. ETFs / indices have no analyst coverage (empty list →
-``no_coverage``, not an error).
+(strongBuy/buy/hold/sell/strongSell), ~4 months per US stock, with **broad
+coverage** (not plan-locked like FMP free's ~30%, HTTP 402) — but breadth is NOT
+proven to be full: an empty response is ambiguous ``no_coverage`` (could be an
+ETF/index with no analysts, a delisted/unsupported symbol, a transient vendor
+empty, or a real stock with no current recommendations — the API does not say
+which). One call per ticker; free tier is 60 calls/min.
 
 The 4-month window is short for a multi-year backtest, but it is enough for a
-LIVE full-coverage consensus + 3-month REVISION feature, and a DAILY cron
-accumulates the time-series over months (dedup by (ticker, period), keep latest).
-Reuses the source-agnostic ``consensus_score`` / ``FetchResult`` / status
-contract from the FMP fetcher so both feed the same downstream shape.
+LIVE consensus + 3-month REVISION feature, and a DAILY cron accumulates the
+time-series over months (dedup by (ticker, period), keep latest). Reuses the
+source-agnostic ``consensus_score`` / ``FetchResult`` / status contract from the
+FMP fetcher so both feed the same downstream shape.
 """
 from __future__ import annotations
 
@@ -61,8 +63,9 @@ def parse_recommendations(ticker: str, payload: Any, asof=None) -> pd.DataFrame:
 def fetch_recommendations(ticker: str, api_key: str, *, timeout: float = 20.0,
                           asof=None, getter: Callable[..., Any] | None = None) -> FetchResult:
     """One ticker's recommendation trend as a :class:`FetchResult`. Never raises.
-    Status: with_data / no_coverage (empty — e.g. an ETF) / quota_error (429) /
-    fetch_error (bad key 401/403, schema, network). ``getter`` injectable for tests."""
+    Status: with_data / no_coverage (empty — AMBIGUOUS: ETF/index, delisted/
+    unsupported, vendor-empty, or a real stock with no current recs) / quota_error
+    (429) / fetch_error (bad key 401/403, schema, network). ``getter`` injectable for tests."""
     empty = parse_recommendations(ticker, None, asof=asof)
     try:
         if getter is None:

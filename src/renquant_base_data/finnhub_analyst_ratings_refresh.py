@@ -4,9 +4,12 @@ Pulls ``/stock/recommendation`` per watchlist ticker into
 ``data/analyst_ratings_finnhub.parquet`` and append-merges (dedup by
 (ticker, period)) so the recommendation history ACCUMULATES over time — the
 free Finnhub window is only ~4 months, but a daily cron grows a multi-month
-series for the 3-month REVISION feature. Full stock coverage (ETFs/indices have
-no analysts → ``no_coverage``, not an error). Key from ``FINNHUB_API_KEY``
-(.env, gitignored). Free tier 60 calls/min → throttle ~1s; ~145 names ≈ 2.5 min.
+series for the 3-month REVISION feature. Coverage is BROAD but not proven full —
+an empty response is ambiguous ``no_coverage`` (ETF/index, delisted/unsupported,
+vendor-empty, or no current recs), so the summary reports ``active_coverage_pct``
+/ ``no_coverage_pct`` over the full requested set, never just coverable cov. Key
+from ``FINNHUB_API_KEY`` (.env, gitignored). Free 60 calls/min → throttle ~1s;
+~145 names ≈ 2.5 min.
 """
 from __future__ import annotations
 
@@ -103,7 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sleep-sec", type=float, default=1.0,
                    help="throttle between calls (free tier 60/min)")
     p.add_argument("--max-pull", type=int, default=0,
-                   help="0 = whole watchlist (full coverage daily; ~2.5 min). N = "
+                   help="0 = whole watchlist daily (~2.5 min; active coverage is "
+                        "whatever Finnhub returns, not assumed full). N = "
                         "incremental most-stale batch.")
     p.add_argument("--min-coverage-pct", type=float, default=0.0)
     p.add_argument("--fail-on-error", action="store_true")
