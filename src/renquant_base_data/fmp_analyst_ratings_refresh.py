@@ -2,9 +2,18 @@
 
 Pulls ``grades-historical`` per watchlist ticker (full ~7.5y history each),
 throttled to respect the free-tier per-minute cap, into
-``data/analyst_ratings_fmp.parquet``. ~142 names fit the 250-calls/day free
-limit; ratings update monthly so a WEEKLY cron is ample. The key comes from
-``FMP_API_KEY`` (in .env, gitignored — never committed).
+``data/analyst_ratings_fmp.parquet``. The key comes from ``FMP_API_KEY`` (in
+.env, gitignored — never committed).
+
+SCOPE (ground truth 2026-06-24): on the FREE BASIC tier ``grades-historical`` is
+plan-locked (HTTP 402 "Special Endpoint") for ~70% of a large-cap watchlist, so
+this is an ingestion library for the free-tier COVERABLE SUBSET (~30% of the
+active watchlist, megacap-biased), NOT a full active-watchlist analyst feature.
+The summary emits ``coverage_pct`` (over the coverable set) AND
+``active_coverage_pct`` (over the full active set) + ``premium_restricted_pct``
+so the two are never conflated. A panel-wide analyst-revision feature requires a
+paid plan; until then any validation off this data is subset-only/exploratory
+with megacap bias and must not drive a production or retrain decision.
 """
 from __future__ import annotations
 
@@ -101,7 +110,15 @@ def refresh_fmp_ratings(*, watchlist: list[str], output: str | Path, api_key: st
         "errors_total": errors_total,
         "empty": buckets.get(NO_COVERAGE, 0) + premium + errors_total,  # back-compat alias
         "coverable": coverable,
+        # coverage_pct = with_data over the COVERABLE set (requested - premium):
+        # the only fraction a free key can move. active_coverage_pct = with_data
+        # over the FULL requested active set (premium counted AGAINST it): the
+        # honest answer to "what % of the active watchlist does this feature
+        # actually have?" — these differ by ~3x on free tier and must not be
+        # conflated (Codex #24). premium_restricted_pct quantifies the plan lock.
         "coverage_pct": round(100.0 * with_data / coverable, 1) if coverable else 0.0,
+        "active_coverage_pct": round(100.0 * with_data / requested, 1) if requested else 0.0,
+        "premium_restricted_pct": round(100.0 * premium / requested, 1) if requested else 0.0,
         "total_rows": int(len(df)),
         "tickers_in_store": int(df["ticker"].nunique()) if len(df) else 0,
         "error_samples": errors[:10],

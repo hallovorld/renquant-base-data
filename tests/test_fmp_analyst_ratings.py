@@ -178,6 +178,10 @@ def test_refresh_premium_excluded_from_errors_and_coverage_denom(tmp_path):
     assert s["with_data"] == 2 and s["premium_restricted"] == 3
     assert s["errors_total"] == 0          # premium is NOT an error
     assert s["coverable"] == 2 and s["coverage_pct"] == 100.0
+    # honesty metrics (Codex #24): coverable coverage is 100% but the ACTIVE
+    # watchlist is only 40% covered, with 60% plan-locked — never conflate them.
+    assert s["active_coverage_pct"] == 40.0
+    assert s["premium_restricted_pct"] == 60.0
     # so a premium-heavy run passes both gates cleanly
     assert R.evaluate_gates(s, min_coverage_pct=90.0, fail_on_error=True) == []
 
