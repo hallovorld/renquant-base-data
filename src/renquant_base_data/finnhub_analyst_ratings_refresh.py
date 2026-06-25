@@ -7,8 +7,12 @@ free Finnhub window is only ~4 months, but a daily cron grows a multi-month
 series for the 3-month REVISION feature. Coverage is BROAD but not proven full —
 an empty response is ambiguous ``no_coverage`` (ETF/index, delisted/unsupported,
 vendor-empty, or no current recs), so the summary reports ``active_coverage_pct``
-/ ``no_coverage_pct`` over the full requested set, never just coverable cov. Key
-from ``FINNHUB_API_KEY`` (.env, gitignored). Free 60 calls/min → throttle ~1s;
+/ ``no_coverage_pct`` over the full requested set, never just coverable cov. The
+fail-closed coverage gate is ``--min-active-coverage-pct`` (floors
+``active_coverage_pct`` = with_data/requested), so a widespread-empty run can't
+pass; ``--min-coverage-pct`` (over the coverable set, which excludes the
+ambiguous bucket) is a diagnostic floor only (Codex #25). Key from
+``FINNHUB_API_KEY`` (.env, gitignored). Free 60 calls/min → throttle ~1s;
 ~145 names ≈ 2.5 min.
 """
 from __future__ import annotations
@@ -109,7 +113,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="0 = whole watchlist daily (~2.5 min; active coverage is "
                         "whatever Finnhub returns, not assumed full). N = "
                         "incremental most-stale batch.")
-    p.add_argument("--min-coverage-pct", type=float, default=0.0)
+    p.add_argument("--min-active-coverage-pct", type=float, default=0.0,
+                   help="FAIL-CLOSED coverage control: exit non-zero if "
+                        "active_coverage_pct (with_data/requested, over the FULL "
+                        "watchlist) falls below this %%. This is the gate to use — "
+                        "the ambiguous no_coverage bucket (ETF/index OR delisted/"
+                        "uncovered/vendor-empty) counts AGAINST it, so a mostly-"
+                        "empty run cannot pass (Codex #25).")
+    p.add_argument("--min-coverage-pct", type=float, default=0.0,
+                   help="DIAGNOSTIC ONLY (do NOT use as the safety gate): floors "
+                        "coverage_pct (with_data/coverable), which EXCLUDES the "
+                        "ambiguous no_coverage bucket — 5/145 with_data still reads "
+                        "100%% coverable cov, so this cannot fail-close on a "
+                        "widespread-empty run. Use --min-active-coverage-pct.")
     p.add_argument("--fail-on-error", action="store_true")
     return p
 
@@ -123,8 +139,13 @@ def main(argv: list[str] | None = None) -> int:
     summary = refresh_finnhub_ratings(
         watchlist=load_watchlist(args.watchlist), output=args.output,
         api_key=key, sleep_sec=args.sleep_sec, max_pull=args.max_pull)
+    # active_coverage_pct (with_data/requested) is the fail-closed control: the
+    # ambiguous no_coverage bucket counts against it, so a mostly-empty run can't
+    # pass a floor that coverage_pct (over the coverable set) would read as 100%
+    # (Codex #25). --min-coverage-pct stays a diagnostic floor only.
     violations = evaluate_gates(summary, min_coverage_pct=args.min_coverage_pct,
-                                fail_on_error=args.fail_on_error)
+                                fail_on_error=args.fail_on_error,
+                                min_active_coverage_pct=args.min_active_coverage_pct)
     summary["gate_violations"] = violations
     print(json.dumps(summary))
     if violations:

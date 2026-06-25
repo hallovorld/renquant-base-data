@@ -129,11 +129,23 @@ def refresh_fmp_ratings(*, watchlist: list[str], output: str | Path, api_key: st
 
 
 def evaluate_gates(summary: dict, *, min_coverage_pct: float,
-                   fail_on_error: bool) -> list[str]:
+                   fail_on_error: bool,
+                   min_active_coverage_pct: float | None = None) -> list[str]:
     """Return a list of gate VIOLATIONS (empty == pass). Lets the run prove it is
     valid instead of silently accepting error-degraded coverage. A
     ``premium_restricted`` 402 is the plan ceiling, not a failure — it never
-    trips either gate (errors exclude it; coverage is over the coverable set)."""
+    trips either gate (errors exclude it; coverage is over the coverable set).
+
+    ``min_coverage_pct`` gates ``coverage_pct`` (with_data over the COVERABLE
+    set). For FMP that denominator excludes only the PERMANENT 402 plan ceiling,
+    so it is a sound control. But where the excluded bucket is AMBIGUOUS — e.g.
+    Finnhub's ``no_coverage`` (ETF/index OR delisted/uncovered/vendor-empty,
+    indistinguishable) — ``coverage_pct`` can read 100% while almost nothing
+    returned data (5/145 with_data, 140 empty → coverable cov 100%). For those
+    callers pass ``min_active_coverage_pct`` to gate ``active_coverage_pct``
+    (with_data over the FULL requested set) instead: the only fail-closed control
+    that an empty-heavy run cannot inflate (Codex #25). ``None`` (default) =
+    active gate OFF, so the FMP caller's behaviour is unchanged."""
     violations: list[str] = []
     if fail_on_error and summary.get("errors_total", 0) > 0:
         violations.append(
@@ -143,6 +155,12 @@ def evaluate_gates(summary: dict, *, min_coverage_pct: float,
         violations.append(
             f"coverage {summary.get('coverage_pct')}% < required {min_coverage_pct}% "
             f"({summary.get('with_data')}/{summary.get('coverable')} coverable with data)")
+    if (min_active_coverage_pct is not None
+            and summary.get("active_coverage_pct", 0.0) < min_active_coverage_pct):
+        violations.append(
+            f"active coverage {summary.get('active_coverage_pct')}% < required "
+            f"{min_active_coverage_pct}% ({summary.get('with_data')}/"
+            f"{summary.get('requested')} requested with data)")
     return violations
 
 
