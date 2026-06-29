@@ -154,6 +154,90 @@ def load_daily_index(alpha_path: str | Path) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(sorted(dates.unique()))
 
 
+def _read_price_calendar(path: Path) -> pd.DatetimeIndex | None:
+    """Read just the trading-date axis of one OHLCV ``1d.parquet`` file.
+
+    Mirrors :func:`_read_price_series` date handling: the date is either a
+    ``date`` column or the (datetime) index, depending on how the OHLCV cache
+    was written.
+    """
+    if not path.exists():
+        return None
+    try:
+        frame = pd.read_parquet(path, columns=["date"])
+        index = pd.to_datetime(frame["date"])
+    except (KeyError, ValueError):
+        # No ``date`` column -> dates live in the parquet index. Read a single
+        # cheap column and use its index for the calendar.
+        frame = pd.read_parquet(path)
+        index = pd.to_datetime(frame.index)
+    return pd.DatetimeIndex(index).dropna()
+
+
+def load_price_calendar_index(
+    ohlcv_dir: str | Path,
+    tickers: Sequence[str],
+) -> pd.DatetimeIndex:
+    """Build the SERVING daily date axis from the OHLCV price calendar.
+
+    The fundamentals feed is a SERVING artifact whose features
+    (``book_to_price`` etc.) are price-dependent and computable to the latest
+    price date. Historically the daily axis was bound to the alpha158 training
+    dataset, which drops its last ~60 trading days because ``fwd_60d_excess``
+    is unlabeled there. That training-label clip leaked into the live feed,
+    pinning it ~88 calendar days behind the latest price and making the
+    P-FUND-FRESHNESS gate structurally unsatisfiable.
+
+    Deriving the axis from the OHLCV trading calendar (the union of trading
+    dates across the universe's price files) decouples serving from the
+    training label clip: the feed reaches the latest price date while the
+    alpha158 training panel — which LEFT-joins the feed on its own clipped
+    dates — is unaffected.
+
+    Returns an empty index when no OHLCV calendar is available so callers can
+    fall back to the alpha-derived axis.
+    """
+    ohlcv_dir = Path(ohlcv_dir).expanduser().resolve()
+    collected: list[pd.DatetimeIndex] = []
+    for ticker in tickers:
+        idx = _read_price_calendar(ohlcv_dir / str(ticker).upper() / "1d.parquet")
+        if idx is not None and len(idx):
+            collected.append(idx)
+    if not collected:
+        return pd.DatetimeIndex([])
+    union = collected[0]
+    for idx in collected[1:]:
+        union = union.union(idx)
+    return pd.DatetimeIndex(sorted(union.unique()))
+
+
+def resolve_serving_daily_index(
+    *,
+    data_dir: str | Path,
+    universe: Sequence[str],
+    alpha_path: str | Path | None = None,
+) -> pd.DatetimeIndex:
+    """Resolve the SERVING daily date axis for the fundamentals feed.
+
+    Prefers the OHLCV price calendar (fresh to the latest price date) so the
+    live feed is NOT clipped to the alpha158 training dataset's
+    ``fwd_60d_excess`` label horizon. Falls back to the alpha-derived axis only
+    when no OHLCV calendar is available (e.g. an explicit ``alpha_path`` is
+    supplied without an OHLCV cache), preserving prior behaviour for those
+    callers.
+    """
+    data_dir = Path(data_dir).expanduser().resolve()
+    calendar = load_price_calendar_index(data_dir / "ohlcv", universe)
+    if len(calendar):
+        return calendar
+    log.warning(
+        "no OHLCV price calendar under %s for the serving fundamentals axis; "
+        "falling back to the alpha158-derived (training-clipped) date axis",
+        data_dir / "ohlcv",
+    )
+    return load_daily_index(resolve_alpha_path(data_dir, alpha_path))
+
+
 def period_for(year: int, quarter: int, period_type: str) -> str:
     suffix = "I" if period_type == "instant" else ""
     return f"CY{year}Q{quarter}{suffix}"
@@ -461,7 +545,9 @@ def build_daily_fundamentals(
     data_dir = Path(data_dir).expanduser().resolve()
     out = Path(output_path).expanduser().resolve() if output_path else data_dir / DEFAULT_DAILY_OUTPUT
     quarterly = build_quarterly_panel(raw, cik_to_ticker)
-    daily_index = load_daily_index(resolve_alpha_path(data_dir, alpha_path))
+    daily_index = resolve_serving_daily_index(
+        data_dir=data_dir, universe=universe, alpha_path=alpha_path
+    )
     daily_raw = forward_fill_to_daily(quarterly, daily_index, universe, value_cols=RAW_VALUE_COLS)
     features = compute_derived_features(daily_raw, data_dir / "ohlcv")
     if features.empty:
@@ -485,7 +571,9 @@ def build_extended_fundamentals(
     out = Path(output_path).expanduser().resolve() if output_path else data_dir / DEFAULT_EXTENDED_OUTPUT
     quarterly = build_quarterly_panel(raw, cik_to_ticker)
     quarterly_ext = compute_extended_quarterly_features(quarterly)
-    daily_index = load_daily_index(resolve_alpha_path(data_dir, alpha_path))
+    daily_index = resolve_serving_daily_index(
+        data_dir=data_dir, universe=universe, alpha_path=alpha_path
+    )
     daily_ext = forward_fill_to_daily(quarterly_ext, daily_index, universe, value_cols=EXTENDED_FEATURE_COLS)
     if daily_ext.empty:
         raise RuntimeError("SEC extended fundamentals produced no feature rows")
