@@ -448,12 +448,37 @@ def collect_snapshot(
             # Do NOT publish over a (possibly good) existing snapshot.
             return {"status": "partial", "published": False, "out_dir": final_dir,
                     "partial_endpoints": partial, "manifests": manifests}
-        # Atomic publish: replace the final dir in one rename.
+        # Atomic-and-recoverable publish. The prior good snapshot (if any) is
+        # moved aside to ``backup`` and is kept until the new final dir is
+        # DEFINITELY in place. Only after a successful stage->final rename is the
+        # backup deleted. If the stage->final rename fails, we restore the backup
+        # so the previously published good snapshot survives -- a publish error
+        # never leaves the date with NO snapshot. (Earlier code deleted the
+        # backup BEFORE renaming stage->final, so a failure on that second rename
+        # would have destroyed the prior good snapshot; Codex flagged this on
+        # base-data PR #27.)
+        backup: Path | None = None
         if final_dir.exists():
             backup = out_root / f".replaced-{as_of}-{int(time.time())}"
             os.replace(final_dir, backup)
+        try:
+            os.replace(stage_dir, final_dir)
+        except Exception:
+            # Restore the prior good snapshot if we had moved one aside, then
+            # quarantine the failed stage so the bad bytes are never published.
+            if backup is not None and backup.exists():
+                os.replace(backup, final_dir)
+            if stage_dir.exists():
+                quarantine = out_root / f".failed-stage-{as_of}-{int(time.time())}"
+                try:
+                    os.replace(stage_dir, quarantine)
+                except OSError:
+                    shutil.rmtree(stage_dir, ignore_errors=True)
+            raise
+        # stage->final succeeded: the new snapshot is in place. Only now is it
+        # safe to delete the backup of the prior snapshot.
+        if backup is not None:
             shutil.rmtree(backup, ignore_errors=True)
-        os.replace(stage_dir, final_dir)
         stage_dir = final_dir  # consumed by the rename; nothing to clean up
         return {"status": "ok", "published": True, "out_dir": final_dir,
                 "manifests": manifests}

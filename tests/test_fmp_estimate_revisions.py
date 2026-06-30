@@ -241,6 +241,65 @@ def test_publish_is_atomic_no_partial_dir(monkeypatch, tmp_path, tickers):
     assert not list(tmp_path.glob(".replaced-*"))
 
 
+def test_publish_failure_restores_prior_good_snapshot(monkeypatch, tmp_path, tickers):
+    """If the stage->final rename FAILS while an old snapshot exists, the old
+    snapshot must survive unchanged and the failed stage must be cleaned up /
+    quarantined (publish-safety / non-destructive contract; base-data PR #27).
+    """
+    as_of = date.today().isoformat()
+    # 1. Publish a good prior snapshot.
+    good = _run(monkeypatch, tickers=tickers, as_of=as_of, out_root=tmp_path,
+                policy=_all_ok_policy(records_per_sym=1))
+    assert good["published"] is True
+    final_dir = tmp_path / as_of
+    good_manifest = (final_dir / "analyst_estimates.manifest.json").read_text()
+    good_sha = json.loads(good_manifest)["sha256"]
+    good_parquet_bytes = (final_dir / "analyst_estimates.parquet").read_bytes()
+
+    # 2. Force a re-publish, but make ONLY the stage->final os.replace raise.
+    #    The (final->backup) move and the (backup->final) RESTORE must still run,
+    #    so fail only on the move whose source is the staging dir (".stage-*")
+    #    into the final dir -- not on the restore (source ".replaced-*").
+    real_replace = snap.os.replace
+
+    def _replace_failing_on_final(src, dst):
+        if str(dst) == str(final_dir) and Path(src).name.startswith(".stage-"):
+            raise OSError("simulated stage->final failure")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(snap.os, "replace", _replace_failing_on_final)
+
+    with pytest.raises(OSError, match="simulated stage->final failure"):
+        _run(monkeypatch, tickers=tickers, as_of=as_of, out_root=tmp_path,
+             policy=_all_ok_policy(records_per_sym=2), force=True)
+
+    # Restore real os.replace before asserting on the filesystem.
+    monkeypatch.setattr(snap.os, "replace", real_replace)
+
+    # (a) The OLD manifest + parquet are STILL present and UNCHANGED.
+    assert final_dir.is_dir()
+    assert (final_dir / "analyst_estimates.manifest.json").read_text() == good_manifest
+    assert json.loads(
+        (final_dir / "analyst_estimates.manifest.json").read_text()
+    )["sha256"] == good_sha
+    assert (final_dir / "analyst_estimates.parquet").read_bytes() == good_parquet_bytes
+    # The prior snapshot still has every endpoint (publish never half-applied).
+    for endpoint in snap.ENDPOINTS:
+        assert (final_dir / f"{endpoint}.parquet").exists()
+        assert (final_dir / f"{endpoint}.manifest.json").exists()
+
+    # (b) The failed stage is cleaned up or clearly quarantined (no live .stage-*
+    #     residue), and the backup of the prior snapshot was restored (no
+    #     dangling .replaced-* backup left holding the only good copy).
+    assert not list(tmp_path.glob(".stage-*"))
+    assert not list(tmp_path.glob(".replaced-*"))
+    quarantined = list(tmp_path.glob(".failed-stage-*"))
+    # The failed stage is either removed or moved to an obvious quarantine dir,
+    # never left where it could be mistaken for the published snapshot.
+    for q in quarantined:
+        assert q.name.startswith(".failed-stage-")
+
+
 # --- 5. canonical-path guard incl symlink behavior ---------------------------
 @pytest.mark.parametrize("leaf", sorted(snap._FORBIDDEN_LEAVES))
 def test_guard_rejects_forbidden_leaves(leaf):
