@@ -1,4 +1,4 @@
-"""One-shot FMP 5-year fundamentals harvester (M-SIG C2 substrate).
+"""One-shot FMP 5-year fundamentals harvester (research/descriptive substrate).
 
 WHY (2026-07-02): the M-SIG signal stack's quality composite (task C2 in the
 renquant-orchestrator unified plan) needs a multi-year fundamentals panel --
@@ -9,6 +9,24 @@ only; there is no quarterly history and no dedicated, reproducible 5y panel.
 This module is a ONE-SHOT harvester (deliberately NOT scheduled and NOT a
 forward snapshotter): run once, it pulls per-symbol annual AND quarterly
 history for four FMP ``stable`` endpoints into a NEW dedicated directory.
+
+POINT-IN-TIME LIMITATION (this artifact is NOT the C2 confirmatory substrate):
+a one-shot 2026 fetch returns the vendor's CURRENT database values for past
+fiscal periods, with NO per-row revision/version identity. Subsequently
+RESTATED values are therefore indistinguishable from as-filed values, and
+joining these rows to old filing dates does NOT reconstruct what was knowable
+on those dates. Even where the vendor supplies filing timestamps
+(income-statement ``acceptedDate``/``filingDate``, preserved untouched), the
+timestamp does not prove the VALUES are as-filed. Every manifest is stamped
+``admissible_use: research_descriptive_only`` and ``pit_provenance:
+vendor_current_values_no_revision_identity``. The admissible C2 CONFIRMATORY
+path is fixed by the merged M-SIG spec (renquant-orchestrator PR #243, r4):
+observation availability timing must come from a genuine
+``acceptedDate``/``filingDate`` or a SEC EDGAR XBRL join
+(``sec_fundamentals.build_quarterly_panel``'s ``available_date``); an
+observation without one is INADMISSIBLE -- fail closed, never proxy-dated by
+the fiscal-period date -- and NO confirmatory claim may rest on this restated
+history regardless of timing.
 
 House-pattern lineage: modeled closely on
 :mod:`renquant_base_data.fmp_estimate_revisions` (base-data PR #27) and reuses
@@ -53,8 +71,16 @@ Safety contract (same as the house pattern):
   and published via atomic rename ONLY if every target clears its coverage
   floor. A shortfall returns ``status: partial``, publishes NOTHING, and exits
   non-zero.
-* Idempotent verify: an already-published harvest is a no-op unless
-  ``--force``.
+* Verified idempotency: a re-run against an existing output dir DEEP-VERIFIES
+  the published bundle -- the top-level contract manifest (schema + harvester
+  version, universe fingerprint, endpoint x period target set incl. path
+  templates), every child parquet AND child manifest sha256 against on-disk
+  bytes, per-target status/coverage against the requested floor, and the
+  guaranteed row columns. All green -> no-op skip. ANY mismatch (truncated or
+  corrupt parquet, tampered manifest, stale/incomplete target set, changed
+  universe, version drift) -> loud ``verify_failed`` (exit 3) that neither
+  skips nor silently re-fetches; ``--force`` is the explicit recovery that
+  re-harvests and atomically replaces the bundle.
 * ``--dry-run`` lists every planned request group and makes ZERO network calls
   and ZERO writes.
 * RUNNING the harvest against the live FMP API is a separate operator-granted
@@ -77,6 +103,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -132,6 +159,40 @@ HARVEST_MANIFEST = "harvest.manifest.json"
 DEFAULT_MIN_COVERAGE = 0.90
 # FMP Starter = 300 req/min; 0.5 s/request ~= 120 req/min, well under half.
 THROTTLE_S = 0.50
+
+HARVESTER = "fmp_fundamentals_5y"
+# Bundle identity, verified on every re-run before an idempotent skip.
+# v1 = the initial PR round (never harvested live); v2 adds the verified
+# idempotency contract (universe fingerprint, child hashes) + the PIT stamp.
+SCHEMA_VERSION = 2
+# Bump on ANY behavior change to fetch/stamp/publish, even schema-compatible
+# ones -- a version-drifted bundle must be an explicit --force decision.
+HARVESTER_VERSION = "1.1.0"
+
+# PIT stamp (see POINT-IN-TIME LIMITATION in the module docstring): a one-shot
+# fetch of vendor-current history carries no per-row revision identity, so it
+# is research/descriptive-only -- NEVER a C2 confirmatory input.
+ADMISSIBLE_USE = "research_descriptive_only"
+PIT_PROVENANCE = "vendor_current_values_no_revision_identity"
+PIT_NOTE = (
+    "One-shot fetch of the vendor's CURRENT database: historical rows may hold "
+    "subsequently RESTATED values with no revision/version identity, so joining "
+    "them to old filing dates does not reconstruct what was knowable then. "
+    "Admissible C2 confirmatory use per renquant-orchestrator PR #243 (r4): "
+    "availability timing only from a genuine acceptedDate/filingDate or a SEC "
+    "EDGAR XBRL join (sec_fundamentals.build_quarterly_panel available_date); "
+    "observations without one are INADMISSIBLE (fail closed, never proxy-dated "
+    "by the fiscal-period date), and no confirmatory claim may rest on this "
+    "restated history regardless of timing."
+)
+
+# Columns this harvester guarantees on every published row; verified on skip.
+REQUIRED_ROW_COLUMNS: tuple[str, ...] = (
+    "symbol",
+    "fiscal_date",
+    "harvest_period",
+    "fetched_at",
+)
 
 # fetch(session, endpoint_path, sym, api_key) -> (records | None, error | None)
 FetchFn = Callable[..., "tuple[list[dict[str, Any]] | None, str | None]"]
@@ -256,6 +317,10 @@ def harvest_one_target(
         "period": target["period"],
         "path_template": target["path_template"],
         "url_base": FMP_STABLE_BASE,
+        "schema_version": SCHEMA_VERSION,
+        "harvester_version": HARVESTER_VERSION,
+        "admissible_use": ADMISSIBLE_USE,
+        "pit_provenance": PIT_PROVENANCE,
         "requested": requested,
         "with_data": with_data,
         "no_data": no_data,
@@ -280,13 +345,127 @@ def harvest_one_target(
     return manifest
 
 
-def _harvest_is_published(out_dir: Path, targets: Sequence[dict[str, str]]) -> bool:
-    """Published = the dir holds the top-level manifest + one per target."""
-    if not out_dir.is_dir():
-        return False
-    if not (out_dir / HARVEST_MANIFEST).exists():
-        return False
-    return all((out_dir / f"{t['name']}.manifest.json").exists() for t in targets)
+def universe_fingerprint(tickers: Sequence[str]) -> str:
+    """Order- and duplication-insensitive identity of the requested universe."""
+    canon = "\n".join(sorted({t.strip() for t in tickers if t.strip()}))
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+
+
+def verify_published_bundle(
+    out_dir: Path,
+    targets: Sequence[dict[str, str]],
+    tickers: Sequence[str],
+    min_coverage: float,
+) -> list[str]:
+    """Deep-verify a published bundle against the CURRENT request.
+
+    Returns a list of human-readable problems; empty == verified. An idempotent
+    skip is allowed ONLY on an empty list -- manifest-file existence alone says
+    nothing about a truncated parquet, a tampered manifest, a stale target set,
+    or a bundle harvested for a different universe/schema. Checked:
+
+      * top-level contract manifest: parseable, harvester name, schema_version,
+        harvester_version, universe fingerprint (sha256 of the sorted deduped
+        ticker set), per-target contract entries;
+      * target set: stamped names == the requested endpoint x period targets
+        (both directions), and each stamped ``path_template`` matches the
+        code's current endpoint/period/limit config;
+      * per target: child manifest exists, its sha256 matches the top-level
+        ``manifest_sha256`` (tamper evidence), parquet exists, its sha256
+        matches BOTH recorded hashes, child status is ``ok``, recorded
+        coverage clears the CURRENTLY requested floor, and the parquet reads
+        back with every guaranteed row column.
+    """
+    top_path = out_dir / HARVEST_MANIFEST
+    if not top_path.is_file():
+        return [f"missing top-level manifest {HARVEST_MANIFEST}"]
+    try:
+        top = json.loads(top_path.read_text())
+    except (OSError, ValueError) as exc:
+        return [f"unreadable top-level manifest: {exc}"]
+
+    problems: list[str] = []
+    if top.get("harvester") != HARVESTER:
+        problems.append(f"harvester mismatch: bundle={top.get('harvester')!r}")
+    if top.get("schema_version") != SCHEMA_VERSION:
+        problems.append(
+            f"schema_version mismatch: bundle={top.get('schema_version')!r} "
+            f"code={SCHEMA_VERSION}"
+        )
+    if top.get("harvester_version") != HARVESTER_VERSION:
+        problems.append(
+            f"harvester_version mismatch: bundle={top.get('harvester_version')!r} "
+            f"code={HARVESTER_VERSION!r}"
+        )
+    if top.get("universe_sha256") != universe_fingerprint(tickers):
+        problems.append(
+            "universe fingerprint mismatch: bundle was harvested for a "
+            "different ticker universe than the one now requested"
+        )
+
+    stamped = top.get("targets")
+    if not isinstance(stamped, dict):
+        problems.append("top-level manifest carries no per-target contract")
+        return problems
+    expected = {t["name"]: t for t in targets}
+    missing = sorted(set(expected) - set(stamped))
+    extra = sorted(set(stamped) - set(expected))
+    if missing:
+        problems.append(f"bundle lacks requested target(s): {missing}")
+    if extra:
+        problems.append(f"bundle carries unrequested target(s): {extra}")
+
+    for name in sorted(set(expected) & set(stamped)):
+        entry = stamped[name]
+        if entry.get("path_template") != expected[name]["path_template"]:
+            problems.append(
+                f"{name}: endpoint/period config drift: bundle fetched "
+                f"{entry.get('path_template')!r}, code now requests "
+                f"{expected[name]['path_template']!r}"
+            )
+        man_path = out_dir / f"{name}.manifest.json"
+        if not man_path.is_file():
+            problems.append(f"{name}: missing child manifest")
+            continue
+        if entry.get("manifest_sha256") != _sha256_file(man_path):
+            problems.append(
+                f"{name}: child manifest sha256 mismatch (tampered or partial write)"
+            )
+        try:
+            child = json.loads(man_path.read_text())
+        except (OSError, ValueError) as exc:
+            problems.append(f"{name}: unreadable child manifest: {exc}")
+            continue
+        parquet_path = out_dir / str(entry.get("output") or f"{name}.parquet")
+        if not parquet_path.is_file():
+            problems.append(f"{name}: missing parquet {parquet_path.name}")
+            continue
+        actual_sha = _sha256_file(parquet_path)
+        if actual_sha != entry.get("sha256") or actual_sha != child.get("sha256"):
+            problems.append(
+                f"{name}: parquet sha256 mismatch (on-disk bytes vs recorded "
+                "hashes -- truncated, corrupt, or replaced)"
+            )
+            continue  # bytes are wrong; do not attempt to parse them
+        if child.get("status") != "ok":
+            problems.append(f"{name}: child status {child.get('status')!r} != 'ok'")
+        coverage = child.get("coverage")
+        if not isinstance(coverage, (int, float)) or coverage < min_coverage:
+            problems.append(
+                f"{name}: recorded coverage {coverage!r} below the requested "
+                f"floor {min_coverage}"
+            )
+        try:
+            columns = set(pd.read_parquet(parquet_path).columns)
+        except Exception as exc:  # noqa: BLE001 - any parse failure = corrupt
+            problems.append(f"{name}: unreadable parquet: {exc}")
+            continue
+        missing_cols = [c for c in REQUIRED_ROW_COLUMNS if c not in columns]
+        if missing_cols:
+            problems.append(
+                f"{name}: parquet missing required column(s) {missing_cols}"
+            )
+    return problems
 
 
 def harvest(
@@ -306,8 +485,13 @@ def harvest(
 
     Safety contract (house pattern):
       * ``dry_run`` returns the request plan -- ZERO fetch calls, ZERO writes.
-      * Idempotent verify -- an already-published harvest is a no-op
-        (``skipped``) unless ``force``.
+      * Verified idempotency -- if the output dir exists, the published bundle
+        is DEEP-VERIFIED (:func:`verify_published_bundle`: hashes, target set,
+        universe fingerprint, schema/harvester version, coverage floor, row
+        columns). Fully verified -> no-op ``skipped``. ANY mismatch ->
+        ``verify_failed``: nothing is skipped, nothing is re-fetched, the
+        problems are surfaced, and re-harvesting over the bad bundle requires
+        an explicit ``force``.
       * All-or-nothing atomic publish -- every target is staged into a sibling
         temp dir; only if EVERY target clears ``min_coverage`` is the dir
         published via atomic ``os.replace``. A shortfall publishes NOTHING
@@ -342,12 +526,21 @@ def harvest(
             "manifests": [],
         }
 
-    if _harvest_is_published(out_dir, targets) and not force:
+    if out_dir.exists() and not force:
+        problems = verify_published_bundle(out_dir, targets, tickers, min_coverage)
+        if problems:
+            return {
+                "status": "verify_failed",
+                "published": False,
+                "out_dir": out_dir,
+                "problems": problems,
+                "manifests": [],
+            }
         return {
             "status": "skipped",
             "published": False,
             "out_dir": out_dir,
-            "reason": "already_published",
+            "reason": "already_published_verified",
             "manifests": [],
         }
 
@@ -370,18 +563,37 @@ def harvest(
             for target in targets
         ]
         partial = [m["name"] for m in manifests if m["status"] != "ok"]
+        # Top-level contract manifest: binds the universe (fingerprint), the
+        # endpoint x period config (path templates), the code/schema version,
+        # the PIT stamp, and EVERY child hash (parquet + child manifest), so a
+        # later idempotent skip can deep-verify the whole bundle.
         summary: dict[str, Any] = {
-            "harvester": "fmp_fundamentals_5y",
+            "harvester": HARVESTER,
+            "harvester_version": HARVESTER_VERSION,
+            "schema_version": SCHEMA_VERSION,
+            "admissible_use": ADMISSIBLE_USE,
+            "pit_provenance": PIT_PROVENANCE,
+            "pit_note": PIT_NOTE,
             "fetched_at": fetched_at,
             "universe": len(tickers),
+            "universe_sha256": universe_fingerprint(tickers),
             "periods": list(periods),
             "min_coverage": min_coverage,
+            "required_row_columns": list(REQUIRED_ROW_COLUMNS),
             "targets": {
                 m["name"]: {
+                    "endpoint": m["endpoint"],
+                    "period": m["period"],
+                    "path_template": m["path_template"],
+                    "output": m["output"],
                     "rows": m["rows"],
                     "with_data": m["with_data"],
                     "coverage": m["coverage"],
                     "status": m["status"],
+                    "sha256": m["sha256"],
+                    "manifest_sha256": _sha256_file(
+                        stage_dir / f"{m['name']}.manifest.json"
+                    ),
                 }
                 for m in manifests
             },
@@ -464,8 +676,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--force",
         action="store_true",
-        help="re-harvest even if the output dir is already fully published "
-        "(default: an already-published harvest is a no-op verify)",
+        help="re-harvest and atomically replace whatever is at the output dir "
+        "(default: an existing dir is deep-verified -- a fully verified bundle "
+        "is a no-op skip, ANY mismatch fails with exit 3 and requires --force)",
     )
     ap.add_argument(
         "--env",
@@ -556,7 +769,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if result["status"] == "skipped":
         print(
-            f"  already published at {out_dir} -- no-op (pass --force to re-harvest)",
+            f"  already published AND fully verified at {out_dir} (hashes, target "
+            f"set, universe, schema v{SCHEMA_VERSION}) -- no-op "
+            f"(pass --force to re-harvest)",
+            file=sys.stderr,
+        )
+    elif result["status"] == "verify_failed":
+        print(
+            f"  VERIFY FAILED: {out_dir} exists but is NOT a verified published "
+            f"bundle:",
+            file=sys.stderr,
+        )
+        for problem in result["problems"]:
+            print(f"    - {problem}", file=sys.stderr)
+        print(
+            "  refusing BOTH the silent skip and a silent re-fetch; re-run with "
+            "--force to re-harvest and atomically replace it",
             file=sys.stderr,
         )
     elif result["status"] == "partial":
@@ -565,22 +793,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"NOTHING published (prior harvest, if any, left intact)",
             file=sys.stderr,
         )
-
-    print(
-        json.dumps(
-            {
-                "out_dir": str(out_dir),
-                "universe": len(tickers),
-                "periods": periods,
-                "dry_run": args.dry_run,
-                "status": result["status"],
-                "published": result.get("published", False),
-                "targets": {m["name"]: m["rows"] for m in result.get("manifests", [])},
-            },
-            indent=2,
+    elif result["status"] == "ok":
+        print(
+            f"  STAMP: admissible_use={ADMISSIBLE_USE} pit_provenance="
+            f"{PIT_PROVENANCE} -- research/descriptive only, NOT a C2 "
+            f"confirmatory (PIT) input; see the manifest pit_note",
+            file=sys.stderr,
         )
-    )
-    return 1 if result["status"] == "partial" else 0
+
+    payload: dict[str, Any] = {
+        "out_dir": str(out_dir),
+        "universe": len(tickers),
+        "periods": periods,
+        "dry_run": args.dry_run,
+        "status": result["status"],
+        "published": result.get("published", False),
+        "targets": {m["name"]: m["rows"] for m in result.get("manifests", [])},
+    }
+    if result.get("problems"):
+        payload["problems"] = result["problems"]
+    print(json.dumps(payload, indent=2))
+    return {"partial": 1, "verify_failed": 3}.get(result["status"], 0)
 
 
 if __name__ == "__main__":

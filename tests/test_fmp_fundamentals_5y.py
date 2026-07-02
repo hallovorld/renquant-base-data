@@ -10,7 +10,17 @@ NO live FMP calls, no writes outside pytest scratch. Contracts covered:
   * parquet schema: every row carries symbol, fiscal_date, harvest_period,
     fetched_at (vendor-native fields preserved);
   * dry-run: ZERO fetch calls, ZERO writes, full request plan;
-  * idempotent verify / --force re-harvest;
+  * VERIFIED idempotency: the skip path deep-verifies the published bundle
+    (child parquet + manifest hashes, target set, universe fingerprint,
+    schema/harvester version, coverage floor, row columns); corrupted parquet,
+    missing files, tampered manifests, stale/incomplete target sets, and a
+    changed universe all fail loudly (verify_failed, exit 3) instead of being
+    silently accepted, and --force recovers by atomic replacement;
+  * top-level contract manifest binds universe fingerprint, endpoint x period
+    config, code/schema version, PIT stamp, and every child hash;
+  * PIT stamp: admissible_use=research_descriptive_only on every manifest
+    (restated vendor-current history is NOT a C2 confirmatory input; see
+    renquant-orchestrator PR #243 r4);
   * canonical-path guard rejects non-dedicated targets.
 """
 from __future__ import annotations
@@ -140,7 +150,9 @@ def test_manifest_fields_and_sha(tmp_path, tickers):
     assert top["universe"] == len(tickers)
     assert set(top["targets"]) == {m["name"] for m in res["manifests"]}
     for entry in top["targets"].values():
-        assert set(entry) == {"rows", "with_data", "coverage", "status"}
+        assert {"endpoint", "period", "path_template", "output", "rows",
+                "with_data", "coverage", "status", "sha256",
+                "manifest_sha256"} <= set(entry)
 
 
 # --- 4. coverage gate ---------------------------------------------------------------
@@ -261,6 +273,7 @@ def test_idempotent_rerun_is_noop(tmp_path, tickers):
 
     r2 = _run(tickers=tickers, out_dir=out, policy=boom)
     assert r2["status"] == "skipped"
+    assert r2["reason"] == "already_published_verified"
     assert r2["published"] is False
     sha_after = json.loads((out / "ratios_annual.manifest.json").read_text())["sha256"]
     assert sha_before == sha_after
@@ -317,3 +330,216 @@ def test_build_targets_rejects_unknown_or_empty_periods():
         h5y.build_targets(["monthly"])
     with pytest.raises(ValueError, match="at least one period"):
         h5y.build_targets([])
+
+
+# --- 9. verified idempotency: the skip path must deep-verify the bundle ----------------
+def _boom(endpoint_path, sym):
+    raise AssertionError("verification path must not refetch")
+
+
+def _publish_good(tmp_path, tickers, **kw):
+    out = tmp_path / "fmp_harvest_5y"
+    res = _run(tickers=tickers, out_dir=out, policy=_all_ok_policy(), **kw)
+    assert res["published"] is True
+    return out
+
+
+def test_verify_failed_on_corrupted_parquet_then_force_recovers(tmp_path, tickers):
+    """A truncated/corrupt prior harvest must NOT be silently accepted, and
+    --force must recover by re-harvesting + atomic replacement."""
+    out = _publish_good(tmp_path, tickers)
+    pq = out / "key_metrics_annual.parquet"
+    pq.write_bytes(b"definitely not parquet")
+
+    res = _run(tickers=tickers, out_dir=out, policy=_boom)
+    assert res["status"] == "verify_failed"
+    assert res["published"] is False
+    assert any("parquet sha256 mismatch" in p for p in res["problems"])
+    # Nothing skipped, nothing refetched (policy=_boom), nothing touched.
+    assert pq.read_bytes() == b"definitely not parquet"
+
+    # force-replacement recovery: the bad bundle is atomically replaced ...
+    rec = _run(tickers=tickers, out_dir=out, policy=_all_ok_policy(), force=True)
+    assert rec["status"] == "ok" and rec["published"] is True
+    assert len(pd.read_parquet(pq)) == 2 * len(tickers)
+    assert not list(tmp_path.glob(".replaced-*"))
+    # ... and the repaired bundle verifies clean again.
+    assert _run(tickers=tickers, out_dir=out, policy=_boom)["status"] == "skipped"
+
+
+def test_verify_failed_on_missing_parquet_or_manifest(tmp_path, tickers):
+    out = _publish_good(tmp_path, tickers)
+    (out / "ratios_quarterly.parquet").unlink()
+    res = _run(tickers=tickers, out_dir=out, policy=_boom)
+    assert res["status"] == "verify_failed"
+    assert any("missing parquet" in p for p in res["problems"])
+
+    (out / "ratios_annual.manifest.json").unlink()
+    res2 = _run(tickers=tickers, out_dir=out, policy=_boom)
+    assert res2["status"] == "verify_failed"
+    assert any("missing child manifest" in p for p in res2["problems"])
+
+
+def test_verify_failed_on_stale_or_incomplete_target_set(tmp_path, tickers):
+    out = tmp_path / "fmp_harvest_5y"
+    ann = _run(tickers=tickers, out_dir=out, policy=_all_ok_policy(),
+               periods=("annual",))
+    assert ann["published"] is True
+
+    # The annual-only bundle is INCOMPLETE for the default annual+quarterly ask.
+    res = _run(tickers=tickers, out_dir=out, policy=_boom)
+    assert res["status"] == "verify_failed"
+    assert any("lacks requested target" in p for p in res["problems"])
+
+    # The reverse (bundle carries MORE than requested) is a mismatch too.
+    full = _run(tickers=tickers, out_dir=out, policy=_all_ok_policy(), force=True)
+    assert full["published"] is True
+    res2 = _run(tickers=tickers, out_dir=out, policy=_boom, periods=("annual",))
+    assert res2["status"] == "verify_failed"
+    assert any("unrequested target" in p for p in res2["problems"])
+
+
+def test_verify_failed_on_changed_universe(tmp_path, tickers):
+    out = _publish_good(tmp_path, tickers)
+    res = _run(tickers=list(tickers) + ["NEWCO"], out_dir=out, policy=_boom)
+    assert res["status"] == "verify_failed"
+    assert any("universe fingerprint mismatch" in p for p in res["problems"])
+    # Same ticker SET in another order / with dupes is the same universe.
+    shuffled = list(reversed(tickers)) + [tickers[0]]
+    assert _run(tickers=shuffled, out_dir=out, policy=_boom)["status"] == "skipped"
+
+
+def test_verify_failed_on_schema_or_harvester_version_drift(
+    tmp_path, tickers, monkeypatch
+):
+    out = _publish_good(tmp_path, tickers)
+    monkeypatch.setattr(h5y, "SCHEMA_VERSION", h5y.SCHEMA_VERSION + 1)
+    res = _run(tickers=tickers, out_dir=out, policy=_boom)
+    assert res["status"] == "verify_failed"
+    assert any("schema_version mismatch" in p for p in res["problems"])
+
+    monkeypatch.undo()
+    monkeypatch.setattr(h5y, "HARVESTER_VERSION", "999.0.0")
+    res2 = _run(tickers=tickers, out_dir=out, policy=_boom)
+    assert res2["status"] == "verify_failed"
+    assert any("harvester_version mismatch" in p for p in res2["problems"])
+
+
+def test_verify_failed_on_tampered_child_manifest(tmp_path, tickers):
+    out = _publish_good(tmp_path, tickers)
+    man = out / "ratios_annual.manifest.json"
+    doc = json.loads(man.read_text())
+    doc["rows"] = 999_999  # cook the books; parquet bytes stay valid
+    man.write_text(json.dumps(doc, indent=2) + "\n")
+    res = _run(tickers=tickers, out_dir=out, policy=_boom)
+    assert res["status"] == "verify_failed"
+    assert any("child manifest sha256 mismatch" in p for p in res["problems"])
+
+
+def test_verify_failed_when_requested_floor_exceeds_recorded_coverage(
+    tmp_path, tickers
+):
+    out = tmp_path / "fmp_harvest_5y"
+    ok = _all_ok_policy()
+    missing = {tickers[0]}  # 19/20 = 0.95 coverage on every target
+
+    def policy(endpoint_path, sym):
+        return ([], None) if sym in missing else ok(endpoint_path, sym)
+
+    assert _run(tickers=tickers, out_dir=out, policy=policy,
+                min_coverage=0.9)["published"] is True
+    res = _run(tickers=tickers, out_dir=out, policy=_boom, min_coverage=0.99)
+    assert res["status"] == "verify_failed"
+    assert any("below the requested floor" in p for p in res["problems"])
+    # At the floor it was harvested under, it still verifies clean.
+    assert _run(tickers=tickers, out_dir=out, policy=_boom,
+                min_coverage=0.9)["status"] == "skipped"
+
+
+def test_verify_failed_on_unmanifested_existing_dir(tmp_path, tickers):
+    """A pre-existing out_dir that is not a published bundle must fail loudly,
+    not be silently replaced (that now takes an explicit --force)."""
+    out = tmp_path / "fmp_harvest_5y"
+    out.mkdir()
+    (out / "stray.txt").write_text("leftover\n")
+    res = _run(tickers=tickers, out_dir=out, policy=_boom)
+    assert res["status"] == "verify_failed"
+    assert any("missing top-level manifest" in p for p in res["problems"])
+    assert (out / "stray.txt").exists()  # untouched without --force
+
+
+# --- 10. top-level contract manifest ----------------------------------------------------
+def test_top_manifest_binds_full_contract(tmp_path, tickers):
+    out = _publish_good(tmp_path, tickers)
+    top = json.loads((out / h5y.HARVEST_MANIFEST).read_text())
+    assert top["harvester"] == h5y.HARVESTER
+    assert top["schema_version"] == h5y.SCHEMA_VERSION
+    assert top["harvester_version"] == h5y.HARVESTER_VERSION
+    assert top["universe_sha256"] == h5y.universe_fingerprint(tickers)
+    assert top["universe"] == len(tickers)
+    assert top["periods"] == list(h5y.DEFAULT_PERIODS)
+    assert top["required_row_columns"] == list(h5y.REQUIRED_ROW_COLUMNS)
+    expected = {t["name"]: t for t in h5y.build_targets(list(h5y.DEFAULT_PERIODS))}
+    assert set(top["targets"]) == set(expected)
+    for name, entry in top["targets"].items():
+        # Every child hash is bound: parquet bytes AND the child manifest file.
+        assert entry["sha256"] == h5y._sha256_file(out / entry["output"])
+        assert entry["manifest_sha256"] == h5y._sha256_file(
+            out / f"{name}.manifest.json"
+        )
+        assert entry["path_template"] == expected[name]["path_template"]
+
+
+def test_universe_fingerprint_is_order_and_dupe_insensitive():
+    a = h5y.universe_fingerprint(["AAPL", "MSFT", "NVDA"])
+    assert a == h5y.universe_fingerprint(["NVDA", "AAPL", "MSFT", "AAPL", " MSFT "])
+    assert a != h5y.universe_fingerprint(["AAPL", "MSFT"])
+
+
+# --- 11. PIT stamp: research/descriptive only, never C2-confirmatory --------------------
+def test_pit_stamp_on_every_manifest(tmp_path, tickers):
+    out = _publish_good(tmp_path, tickers)
+    top = json.loads((out / h5y.HARVEST_MANIFEST).read_text())
+    assert top["admissible_use"] == "research_descriptive_only"
+    assert top["pit_provenance"] == "vendor_current_values_no_revision_identity"
+    # The note must carry the operative caveats: restatement risk and the
+    # admissible confirmatory path (genuine filing timestamps / SEC EDGAR,
+    # fail closed) from the merged M-SIG spec.
+    note = top["pit_note"]
+    for needle in ("RESTATED", "#243", "acceptedDate", "EDGAR", "INADMISSIBLE"):
+        assert needle in note, f"pit_note missing {needle!r}"
+    for name in top["targets"]:
+        child = json.loads((out / f"{name}.manifest.json").read_text())
+        assert child["admissible_use"] == top["admissible_use"]
+        assert child["pit_provenance"] == top["pit_provenance"]
+        assert child["schema_version"] == h5y.SCHEMA_VERSION
+        assert child["harvester_version"] == h5y.HARVESTER_VERSION
+
+
+# --- 12. CLI surfacing of verify_failed --------------------------------------------------
+def test_main_verify_failed_exits_3_and_prints_problems(
+    tmp_path, tickers, capsys, monkeypatch
+):
+    out = tmp_path / "fmp_harvest_5y"
+    _run(tickers=tickers, out_dir=out, policy=_all_ok_policy())
+    (out / "key_metrics_annual.parquet").write_bytes(b"garbage")
+
+    universe = tmp_path / "universe.txt"
+    universe.write_text("".join(f"{t}\n" for t in tickers))
+    monkeypatch.setenv("FMP_API_KEY", "FAKE")
+
+    # No live session and no network: verification runs before any fetch.
+    class _FakeRequestsModule:
+        class Session:  # noqa: D106 - test stub
+            pass
+
+    monkeypatch.setattr(h5y, "_require_requests", lambda: _FakeRequestsModule)
+
+    rc = h5y.main(["--out", str(out), "--universe", str(universe)])
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert "VERIFY FAILED" in err
+    assert "parquet sha256 mismatch" in err
+    assert "--force" in err
+    # The corrupt bundle was neither skipped nor replaced.
+    assert (out / "key_metrics_annual.parquet").read_bytes() == b"garbage"
