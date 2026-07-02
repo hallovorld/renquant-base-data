@@ -39,6 +39,32 @@ not active at harvest time, every quarterly target 402s, its coverage is 0,
 and the run fails the ``--min-coverage`` gate loudly (nothing is published).
 ``--periods annual`` scopes an annual-only harvest in that case.
 
+PIT CLASSIFICATION (Codex review, 2026-07-02): this harvest is
+``research_descriptive_only``, NOT a confirmatory point-in-time substrate.
+FMP's ``stable`` ``key-metrics``/``ratios``/``financial-growth``/
+``income-statement`` endpoints return CURRENT/LATEST computed values for each
+historical fiscal period -- none of the four expose a vendor revision number,
+an "as originally filed" vs "latest reported" distinction, or any as-filed
+vintage timestamp on the fundamental value itself (verified: no such field
+appears in this module's own code, tests, or the sibling
+``fmp_estimate_revisions`` house pattern; FMP's public docs for these four
+endpoints likewise document no such field). A one-shot 2026 fetch of a
+company's 2020 fiscal-year metrics therefore reflects whatever FMP's
+database holds TODAY for that period -- which may silently include a
+subsequent restatement -- not what was actually knowable/filed in 2020.
+Joining these values to old dates does not reconstruct point-in-time
+knowledge.
+
+Every published manifest (per-target and top-level) carries
+``"pit_classification": "research_descriptive_only"`` accordingly. Per
+``renquant-orchestrator#243``'s merged G106 signal-stack design, task C2's
+actual admissible PIT substrate is a genuine accepted/filing-availability
+join via SEC EDGAR's ``available_date`` (``RenQuant``'s
+``sec_fundamentals.py``) -- this harvester's output may feed C2 only as a
+supplementary/exploratory levels-and-ratios panel, joined against that
+EDGAR-sourced availability date; it must never itself support a confirmatory
+C2 result, and any code path that would use it that way must fail closed.
+
 Rate limiting: FMP Starter allows 300 req/min. The throttle sleeps 0.5s per
 request (~120 req/min), staying well under half the ceiling and leaving
 headroom for any other consumer of the key. A full 114-name x 8-target harvest
@@ -77,6 +103,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -132,6 +159,28 @@ HARVEST_MANIFEST = "harvest.manifest.json"
 DEFAULT_MIN_COVERAGE = 0.90
 # FMP Starter = 300 req/min; 0.5 s/request ~= 120 req/min, well under half.
 THROTTLE_S = 0.50
+PIT_CLASSIFICATION = "research_descriptive_only"
+
+# Bumped whenever the harvest contract changes shape (endpoints, manifest
+# schema, coverage semantics) in a way that makes an old artifact's SEMANTICS
+# stale even if its bytes are intact -- a version mismatch alone must force
+# re-harvest, never a silent skip.
+HARVESTER_VERSION = 1
+
+# Guaranteed harvester-added columns (stamped unconditionally on every row in
+# harvest_one_target) -- their presence in a manifest's recorded
+# schema_columns is the minimal schema check _verify_published_harvest can
+# make without hardcoding the vendor's own response fields, which legitimately
+# vary by endpoint.
+_REQUIRED_HARVESTER_COLUMNS = {"fiscal_date", "harvest_period", "fetched_at"}
+
+
+def _universe_fingerprint(tickers: Sequence[str]) -> str:
+    """Deterministic hash of the exact requested ticker set (order-independent
+    -- the universe is a SET of names, not a sequence with meaningful order)."""
+    return hashlib.sha256(
+        "\n".join(sorted(set(tickers))).encode("utf-8")
+    ).hexdigest()
 
 # fetch(session, endpoint_path, sym, api_key) -> (records | None, error | None)
 FetchFn = Callable[..., "tuple[list[dict[str, Any]] | None, str | None]"]
@@ -270,23 +319,110 @@ def harvest_one_target(
         "started_at": started.isoformat(),
         "finished_at": finished.isoformat(),
         "status": status,
+        "pit_classification": PIT_CLASSIFICATION,
+        "harvester_version": HARVESTER_VERSION,
     }
 
     stage_dir.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(rows)
     df.to_parquet(parquet_path, index=False)
     manifest["sha256"] = _sha256_file(parquet_path)
+    manifest["schema_columns"] = sorted(df.columns.tolist())
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
 
 
-def _harvest_is_published(out_dir: Path, targets: Sequence[dict[str, str]]) -> bool:
-    """Published = the dir holds the top-level manifest + one per target."""
+def _verify_published_harvest(
+    out_dir: Path,
+    targets: Sequence[dict[str, str]],
+    tickers: Sequence[str],
+) -> tuple[bool, str]:
+    """Full verification of a previously-published harvest, not just a
+    manifest-existence check. Returns ``(is_valid, reason)`` -- ``reason`` is
+    empty iff valid, else names the exact mismatch so a caller can log why a
+    re-harvest is required rather than silently skipping OR silently
+    re-fetching.
+
+    A prior harvest is only safe to skip if ALL of the following hold:
+      * the top-level manifest exists and parses as JSON;
+      * its ``harvester_version`` matches this module's current version
+        (a version bump means the contract's SEMANTICS changed even if the
+        old bytes are technically intact);
+      * its ``universe_fingerprint`` matches the CURRENTLY configured
+        universe (a changed universe invalidates the old harvest's
+        coverage claims for the new target set);
+      * every expected per-target manifest exists, parses, and its
+        recorded ``sha256`` matches the ACTUAL on-disk parquet bytes
+        (catches truncation/corruption a manifest-existence check alone
+        cannot see);
+      * every target's parquet file exists and is readable.
+    """
     if not out_dir.is_dir():
-        return False
-    if not (out_dir / HARVEST_MANIFEST).exists():
-        return False
-    return all((out_dir / f"{t['name']}.manifest.json").exists() for t in targets)
+        return False, "output directory does not exist"
+    top_path = out_dir / HARVEST_MANIFEST
+    if not top_path.exists():
+        return False, "top-level harvest manifest missing"
+    try:
+        top = json.loads(top_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"top-level harvest manifest unreadable/corrupt ({exc})"
+
+    if top.get("harvester_version") != HARVESTER_VERSION:
+        return False, (
+            f"harvester_version mismatch (manifest={top.get('harvester_version')!r}, "
+            f"current={HARVESTER_VERSION!r})"
+        )
+
+    expected_fp = _universe_fingerprint(tickers)
+    if top.get("universe_fingerprint") != expected_fp:
+        return False, "universe_fingerprint mismatch (configured universe changed)"
+
+    for t in targets:
+        manifest_path = out_dir / f"{t['name']}.manifest.json"
+        if not manifest_path.exists():
+            return False, f"{t['name']}: per-target manifest missing"
+        try:
+            manifest = json.loads(manifest_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            return False, f"{t['name']}: per-target manifest unreadable/corrupt ({exc})"
+
+        parquet_path = out_dir / manifest.get("output", f"{t['name']}.parquet")
+        if not parquet_path.exists():
+            return False, f"{t['name']}: parquet file missing ({parquet_path})"
+
+        recorded_sha256 = manifest.get("sha256")
+        if not recorded_sha256:
+            return False, f"{t['name']}: manifest has no recorded sha256"
+        try:
+            actual_sha256 = _sha256_file(parquet_path)
+        except OSError as exc:
+            return False, f"{t['name']}: parquet unreadable ({exc})"
+        if actual_sha256 != recorded_sha256:
+            return False, (
+                f"{t['name']}: parquet content hash mismatch "
+                f"(recorded={recorded_sha256[:12]}..., actual={actual_sha256[:12]}...) "
+                "-- prior harvest is truncated or corrupted"
+            )
+
+        if manifest.get("harvester_version") != HARVESTER_VERSION:
+            return False, f"{t['name']}: per-target harvester_version mismatch"
+
+        # Minimal schema check: the vendor's own response fields legitimately
+        # vary by endpoint and can't be hardcoded, but the harvester-added
+        # columns (stamped unconditionally in harvest_one_target) must always
+        # be present -- their absence means an old/pre-fix artifact from
+        # before this contract existed, not a genuinely equivalent harvest.
+        schema_columns = manifest.get("schema_columns")
+        if not schema_columns:
+            return False, f"{t['name']}: manifest has no recorded schema_columns"
+        missing_required = _REQUIRED_HARVESTER_COLUMNS - set(schema_columns)
+        if missing_required:
+            return False, (
+                f"{t['name']}: schema missing required harvester columns "
+                f"{sorted(missing_required)}"
+            )
+
+    return True, ""
 
 
 def harvest(
@@ -342,14 +478,25 @@ def harvest(
             "manifests": [],
         }
 
-    if _harvest_is_published(out_dir, targets) and not force:
-        return {
-            "status": "skipped",
-            "published": False,
-            "out_dir": out_dir,
-            "reason": "already_published",
-            "manifests": [],
-        }
+    if not force:
+        is_valid, invalid_reason = _verify_published_harvest(out_dir, targets, tickers)
+        if is_valid:
+            return {
+                "status": "skipped",
+                "published": False,
+                "out_dir": out_dir,
+                "reason": "already_published",
+                "manifests": [],
+            }
+        elif invalid_reason and out_dir.is_dir() and (out_dir / HARVEST_MANIFEST).exists():
+            # A prior harvest dir exists but failed full verification (stale
+            # version/universe, corrupt/truncated bytes, etc.) -- log why a
+            # re-harvest is happening instead of silently skipping OR
+            # silently overwriting with no trace of the reason.
+            log.warning(
+                "prior harvest at %s failed verification, re-harvesting: %s",
+                out_dir, invalid_reason,
+            )
 
     parent = out_dir.parent
     parent.mkdir(parents=True, exist_ok=True)
@@ -372,8 +519,11 @@ def harvest(
         partial = [m["name"] for m in manifests if m["status"] != "ok"]
         summary: dict[str, Any] = {
             "harvester": "fmp_fundamentals_5y",
+            "harvester_version": HARVESTER_VERSION,
+            "pit_classification": PIT_CLASSIFICATION,
             "fetched_at": fetched_at,
             "universe": len(tickers),
+            "universe_fingerprint": _universe_fingerprint(tickers),
             "periods": list(periods),
             "min_coverage": min_coverage,
             "targets": {
@@ -382,6 +532,8 @@ def harvest(
                     "with_data": m["with_data"],
                     "coverage": m["coverage"],
                     "status": m["status"],
+                    "sha256": m.get("sha256"),
+                    "schema_columns": m.get("schema_columns"),
                 }
                 for m in manifests
             },

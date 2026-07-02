@@ -138,9 +138,17 @@ def test_manifest_fields_and_sha(tmp_path, tickers):
     top = json.loads((out / h5y.HARVEST_MANIFEST).read_text())
     assert top["status"] == "ok"
     assert top["universe"] == len(tickers)
+    assert top["universe_fingerprint"] == h5y._universe_fingerprint(tickers)
+    assert top["harvester_version"] == h5y.HARVESTER_VERSION
+    assert top["pit_classification"] == "research_descriptive_only"
     assert set(top["targets"]) == {m["name"] for m in res["manifests"]}
-    for entry in top["targets"].values():
-        assert set(entry) == {"rows", "with_data", "coverage", "status"}
+    for name, entry in top["targets"].items():
+        # sha256/schema_columns bind every child artifact's exact content
+        # into the top-level manifest -- not just an aggregate status claim.
+        assert set(entry) == {
+            "rows", "with_data", "coverage", "status", "sha256", "schema_columns",
+        }
+        assert entry["sha256"] == h5y._sha256_file(out / f"{name}.parquet")
 
 
 # --- 4. coverage gate ---------------------------------------------------------------
@@ -288,6 +296,120 @@ def test_force_reharvests_and_partial_preserves_prior(tmp_path, tickers):
     still = json.loads((out / "ratios_annual.manifest.json").read_text())["sha256"]
     assert still != good_sha  # it is the r2 harvest ...
     assert len(pd.read_parquet(out / "ratios_annual.parquet")) == 2 * len(tickers)
+
+
+# --- corrupted / stale prior harvest must never be silently skipped -------------
+
+
+def test_corrupted_parquet_forces_reharvest_not_silent_skip(tmp_path, tickers):
+    """A prior harvest whose recorded sha256 no longer matches the on-disk
+    parquet (truncation/corruption) must not be accepted as 'already
+    published' -- the old skip check only looked at manifest presence and
+    would have silently trusted this forever."""
+    out = tmp_path / "fmp_harvest_5y"
+    _run(tickers=tickers, out_dir=out, policy=_all_ok_policy())
+    # Corrupt one published parquet in place (truncate to zero bytes).
+    (out / "ratios_annual.parquet").write_bytes(b"")
+
+    calls: list = []
+    r2 = _run(tickers=tickers, out_dir=out, policy=_all_ok_policy(), calls=calls)
+    assert r2["status"] == "ok"
+    assert r2["published"] is True
+    assert calls, "corrupted prior harvest must trigger a real re-fetch, not a skip"
+    # The re-harvest actually repaired the corrupted file.
+    df = pd.read_parquet(out / "ratios_annual.parquet")
+    assert len(df) == 2 * len(tickers)
+
+
+def test_incomplete_target_manifest_forces_reharvest(tmp_path, tickers):
+    """A prior harvest missing one target's manifest (e.g. an interrupted
+    publish) must not be accepted as 'already published'."""
+    out = tmp_path / "fmp_harvest_5y"
+    _run(tickers=tickers, out_dir=out, policy=_all_ok_policy())
+    (out / "ratios_annual.manifest.json").unlink()
+
+    calls: list = []
+    r2 = _run(tickers=tickers, out_dir=out, policy=_all_ok_policy(), calls=calls)
+    assert r2["status"] == "ok"
+    assert r2["published"] is True
+    assert calls, "incomplete prior harvest must trigger a real re-fetch, not a skip"
+
+
+def test_changed_universe_forces_reharvest(tmp_path, tickers):
+    """A prior harvest published against a DIFFERENT ticker universe than the
+    one now configured must not be accepted as 'already published' -- its
+    coverage claims don't apply to the new target set."""
+    out = tmp_path / "fmp_harvest_5y"
+    _run(tickers=tickers, out_dir=out, policy=_all_ok_policy())
+
+    new_universe = tickers + ["NEWTICKER"]
+    calls: list = []
+    r2 = _run(tickers=new_universe, out_dir=out, policy=_all_ok_policy(), calls=calls)
+    assert r2["status"] == "ok"
+    assert r2["published"] is True
+    assert calls, "a changed universe must trigger a real re-fetch, not a skip"
+    df = pd.read_parquet(out / "ratios_annual.parquet")
+    assert set(df["symbol"]) == set(new_universe)
+
+
+def test_stale_harvester_version_forces_reharvest(tmp_path, tickers, monkeypatch):
+    """A prior harvest published under an older harvester_version must not be
+    accepted as 'already published' even if its bytes are perfectly intact --
+    a version bump means the CONTRACT's semantics changed."""
+    out = tmp_path / "fmp_harvest_5y"
+    _run(tickers=tickers, out_dir=out, policy=_all_ok_policy())
+
+    top = json.loads((out / h5y.HARVEST_MANIFEST).read_text())
+    top["harvester_version"] = -1
+    (out / h5y.HARVEST_MANIFEST).write_text(json.dumps(top, indent=2) + "\n")
+
+    calls: list = []
+    r2 = _run(tickers=tickers, out_dir=out, policy=_all_ok_policy(), calls=calls)
+    assert r2["status"] == "ok"
+    assert r2["published"] is True
+    assert calls, "a stale harvester_version must trigger a real re-fetch, not a skip"
+
+
+def test_verify_published_harvest_reports_specific_reason(tmp_path, tickers):
+    """_verify_published_harvest must name the exact mismatch, not just
+    return a bare boolean -- this is what lets a caller log WHY a re-harvest
+    is happening instead of silently skipping or silently overwriting."""
+    out = tmp_path / "fmp_harvest_5y"
+    targets = h5y.build_targets(list(h5y.DEFAULT_PERIODS))
+
+    is_valid, reason = h5y._verify_published_harvest(out, targets, tickers)
+    assert is_valid is False
+    assert "does not exist" in reason
+
+    _run(tickers=tickers, out_dir=out, policy=_all_ok_policy())
+    is_valid, reason = h5y._verify_published_harvest(out, targets, tickers)
+    assert is_valid is True
+    assert reason == ""
+
+    (out / "ratios_annual.parquet").write_bytes(b"corrupt")
+    is_valid, reason = h5y._verify_published_harvest(out, targets, tickers)
+    assert is_valid is False
+    assert "ratios_annual" in reason
+    assert "corrupt" in reason.lower() or "hash mismatch" in reason.lower()
+
+
+def test_pit_classification_and_manifest_provenance_fields(tmp_path, tickers):
+    """Every published manifest (top-level and per-target) must carry the
+    research_descriptive_only PIT classification, harvester_version, and
+    (top-level) universe_fingerprint -- the fields _verify_published_harvest
+    and any downstream consumer rely on."""
+    out = tmp_path / "fmp_harvest_5y"
+    _run(tickers=tickers, out_dir=out, policy=_all_ok_policy())
+
+    top = json.loads((out / h5y.HARVEST_MANIFEST).read_text())
+    assert top["pit_classification"] == "research_descriptive_only"
+    assert top["harvester_version"] == h5y.HARVESTER_VERSION
+    assert top["universe_fingerprint"] == h5y._universe_fingerprint(tickers)
+
+    per_target = json.loads((out / "ratios_annual.manifest.json").read_text())
+    assert per_target["pit_classification"] == "research_descriptive_only"
+    assert per_target["harvester_version"] == h5y.HARVESTER_VERSION
+    assert set(h5y._REQUIRED_HARVESTER_COLUMNS) <= set(per_target["schema_columns"])
 
 
 # --- 7. canonical-path guard ----------------------------------------------------------
