@@ -12,13 +12,16 @@ history for four FMP ``stable`` endpoints into a NEW dedicated directory.
 
 POINT-IN-TIME LIMITATION (this artifact is NOT the C2 confirmatory substrate):
 a one-shot 2026 fetch returns the vendor's CURRENT database values for past
-fiscal periods, with NO per-row revision/version identity. Subsequently
-RESTATED values are therefore indistinguishable from as-filed values, and
-joining these rows to old filing dates does NOT reconstruct what was knowable
-on those dates. Even where the vendor supplies filing timestamps
-(income-statement ``acceptedDate``/``filingDate``, preserved untouched), the
-timestamp does not prove the VALUES are as-filed. Every manifest is stamped
-``admissible_use: research_descriptive_only`` and ``pit_provenance:
+fiscal periods, with NO per-row revision/version identity -- none of the four
+endpoints exposes a vendor revision number, an "as originally filed" vs
+"latest reported" distinction, or an as-filed vintage timestamp on the values
+themselves. Subsequently RESTATED values are therefore indistinguishable from
+as-filed values, and joining these rows to old filing dates does NOT
+reconstruct what was knowable on those dates. Even where the vendor supplies
+filing timestamps (income-statement ``acceptedDate``/``filingDate``, preserved
+untouched), the timestamp does not prove the VALUES are as-filed. Every
+manifest (per-target and top-level) is stamped ``pit_classification:
+research_descriptive_only`` and ``pit_provenance:
 vendor_current_values_no_revision_identity``. The admissible C2 CONFIRMATORY
 path is fixed by the merged M-SIG spec (renquant-orchestrator PR #243, r4):
 observation availability timing must come from a genuine
@@ -26,7 +29,10 @@ observation availability timing must come from a genuine
 (``sec_fundamentals.build_quarterly_panel``'s ``available_date``); an
 observation without one is INADMISSIBLE -- fail closed, never proxy-dated by
 the fiscal-period date -- and NO confirmatory claim may rest on this restated
-history regardless of timing.
+history regardless of timing. This harvester's output may feed C2 only as a
+supplementary/exploratory levels-and-ratios panel joined against that
+EDGAR-sourced availability date; it must never itself support a confirmatory
+C2 result.
 
 House-pattern lineage: modeled closely on
 :mod:`renquant_base_data.fmp_estimate_revisions` (base-data PR #27) and reuses
@@ -167,12 +173,14 @@ HARVESTER = "fmp_fundamentals_5y"
 SCHEMA_VERSION = 2
 # Bump on ANY behavior change to fetch/stamp/publish, even schema-compatible
 # ones -- a version-drifted bundle must be an explicit --force decision.
-HARVESTER_VERSION = "1.1.0"
+# (v1 = the two pre-unification review-round implementations; v2 = the
+# unified fail-closed contract.)
+HARVESTER_VERSION = 2
 
 # PIT stamp (see POINT-IN-TIME LIMITATION in the module docstring): a one-shot
 # fetch of vendor-current history carries no per-row revision identity, so it
 # is research/descriptive-only -- NEVER a C2 confirmatory input.
-ADMISSIBLE_USE = "research_descriptive_only"
+PIT_CLASSIFICATION = "research_descriptive_only"
 PIT_PROVENANCE = "vendor_current_values_no_revision_identity"
 PIT_NOTE = (
     "One-shot fetch of the vendor's CURRENT database: historical rows may hold "
@@ -319,7 +327,7 @@ def harvest_one_target(
         "url_base": FMP_STABLE_BASE,
         "schema_version": SCHEMA_VERSION,
         "harvester_version": HARVESTER_VERSION,
-        "admissible_use": ADMISSIBLE_USE,
+        "pit_classification": PIT_CLASSIFICATION,
         "pit_provenance": PIT_PROVENANCE,
         "requested": requested,
         "with_data": with_data,
@@ -341,6 +349,9 @@ def harvest_one_target(
     df = pd.DataFrame(rows)
     df.to_parquet(parquet_path, index=False)
     manifest["sha256"] = _sha256_file(parquet_path)
+    # The exact published column set; lets a consumer (and the verifier) know
+    # the schema without a parquet read (the sha256 binds it to the bytes).
+    manifest["schema_columns"] = sorted(df.columns.tolist())
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
 
@@ -397,7 +408,7 @@ def verify_published_bundle(
             f"harvester_version mismatch: bundle={top.get('harvester_version')!r} "
             f"code={HARVESTER_VERSION!r}"
         )
-    if top.get("universe_sha256") != universe_fingerprint(tickers):
+    if top.get("universe_fingerprint") != universe_fingerprint(tickers):
         problems.append(
             "universe fingerprint mismatch: bundle was harvested for a "
             "different ticker universe than the one now requested"
@@ -455,6 +466,18 @@ def verify_published_bundle(
                 f"{name}: recorded coverage {coverage!r} below the requested "
                 f"floor {min_coverage}"
             )
+        recorded_cols = child.get("schema_columns")
+        if not recorded_cols:
+            problems.append(f"{name}: child manifest records no schema_columns")
+        else:
+            missing_recorded = [
+                c for c in REQUIRED_ROW_COLUMNS if c not in set(recorded_cols)
+            ]
+            if missing_recorded:
+                problems.append(
+                    f"{name}: recorded schema_columns missing required "
+                    f"column(s) {missing_recorded}"
+                )
         try:
             columns = set(pd.read_parquet(parquet_path).columns)
         except Exception as exc:  # noqa: BLE001 - any parse failure = corrupt
@@ -571,12 +594,12 @@ def harvest(
             "harvester": HARVESTER,
             "harvester_version": HARVESTER_VERSION,
             "schema_version": SCHEMA_VERSION,
-            "admissible_use": ADMISSIBLE_USE,
+            "pit_classification": PIT_CLASSIFICATION,
             "pit_provenance": PIT_PROVENANCE,
             "pit_note": PIT_NOTE,
             "fetched_at": fetched_at,
             "universe": len(tickers),
-            "universe_sha256": universe_fingerprint(tickers),
+            "universe_fingerprint": universe_fingerprint(tickers),
             "periods": list(periods),
             "min_coverage": min_coverage,
             "required_row_columns": list(REQUIRED_ROW_COLUMNS),
@@ -591,6 +614,7 @@ def harvest(
                     "coverage": m["coverage"],
                     "status": m["status"],
                     "sha256": m["sha256"],
+                    "schema_columns": m["schema_columns"],
                     "manifest_sha256": _sha256_file(
                         stage_dir / f"{m['name']}.manifest.json"
                     ),
@@ -795,7 +819,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     elif result["status"] == "ok":
         print(
-            f"  STAMP: admissible_use={ADMISSIBLE_USE} pit_provenance="
+            f"  STAMP: pit_classification={PIT_CLASSIFICATION} pit_provenance="
             f"{PIT_PROVENANCE} -- research/descriptive only, NOT a C2 "
             f"confirmatory (PIT) input; see the manifest pit_note",
             file=sys.stderr,

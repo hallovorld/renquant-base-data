@@ -18,7 +18,7 @@ NO live FMP calls, no writes outside pytest scratch. Contracts covered:
     silently accepted, and --force recovers by atomic replacement;
   * top-level contract manifest binds universe fingerprint, endpoint x period
     config, code/schema version, PIT stamp, and every child hash;
-  * PIT stamp: admissible_use=research_descriptive_only on every manifest
+  * PIT stamp: pit_classification=research_descriptive_only on every manifest
     (restated vendor-current history is NOT a C2 confirmatory input; see
     renquant-orchestrator PR #243 r4);
   * canonical-path guard rejects non-dedicated targets.
@@ -148,11 +148,17 @@ def test_manifest_fields_and_sha(tmp_path, tickers):
     top = json.loads((out / h5y.HARVEST_MANIFEST).read_text())
     assert top["status"] == "ok"
     assert top["universe"] == len(tickers)
+    assert top["universe_fingerprint"] == h5y.universe_fingerprint(tickers)
+    assert top["harvester_version"] == h5y.HARVESTER_VERSION
+    assert top["pit_classification"] == "research_descriptive_only"
     assert set(top["targets"]) == {m["name"] for m in res["manifests"]}
-    for entry in top["targets"].values():
+    for name, entry in top["targets"].items():
+        # sha256/manifest_sha256/schema_columns bind every child artifact's
+        # exact content into the top-level manifest, not just a status claim.
         assert {"endpoint", "period", "path_template", "output", "rows",
-                "with_data", "coverage", "status", "sha256",
+                "with_data", "coverage", "status", "sha256", "schema_columns",
                 "manifest_sha256"} <= set(entry)
+        assert entry["sha256"] == h5y._sha256_file(out / f"{name}.parquet")
 
 
 # --- 4. coverage gate ---------------------------------------------------------------
@@ -419,10 +425,21 @@ def test_verify_failed_on_schema_or_harvester_version_drift(
     assert any("schema_version mismatch" in p for p in res["problems"])
 
     monkeypatch.undo()
-    monkeypatch.setattr(h5y, "HARVESTER_VERSION", "999.0.0")
+    monkeypatch.setattr(h5y, "HARVESTER_VERSION", 999)
     res2 = _run(tickers=tickers, out_dir=out, policy=_boom)
     assert res2["status"] == "verify_failed"
     assert any("harvester_version mismatch" in p for p in res2["problems"])
+
+    # Artifact-side drift (a bundle stamped by an OLDER harvester) is the
+    # same mismatch seen from the other side.
+    monkeypatch.undo()
+    top_path = out / h5y.HARVEST_MANIFEST
+    doc = json.loads(top_path.read_text())
+    doc["harvester_version"] = -1
+    top_path.write_text(json.dumps(doc, indent=2) + "\n")
+    res3 = _run(tickers=tickers, out_dir=out, policy=_boom)
+    assert res3["status"] == "verify_failed"
+    assert any("harvester_version mismatch" in p for p in res3["problems"])
 
 
 def test_verify_failed_on_tampered_child_manifest(tmp_path, tickers):
@@ -475,7 +492,7 @@ def test_top_manifest_binds_full_contract(tmp_path, tickers):
     assert top["harvester"] == h5y.HARVESTER
     assert top["schema_version"] == h5y.SCHEMA_VERSION
     assert top["harvester_version"] == h5y.HARVESTER_VERSION
-    assert top["universe_sha256"] == h5y.universe_fingerprint(tickers)
+    assert top["universe_fingerprint"] == h5y.universe_fingerprint(tickers)
     assert top["universe"] == len(tickers)
     assert top["periods"] == list(h5y.DEFAULT_PERIODS)
     assert top["required_row_columns"] == list(h5y.REQUIRED_ROW_COLUMNS)
@@ -488,6 +505,7 @@ def test_top_manifest_binds_full_contract(tmp_path, tickers):
             out / f"{name}.manifest.json"
         )
         assert entry["path_template"] == expected[name]["path_template"]
+        assert set(h5y.REQUIRED_ROW_COLUMNS) <= set(entry["schema_columns"])
 
 
 def test_universe_fingerprint_is_order_and_dupe_insensitive():
@@ -500,7 +518,7 @@ def test_universe_fingerprint_is_order_and_dupe_insensitive():
 def test_pit_stamp_on_every_manifest(tmp_path, tickers):
     out = _publish_good(tmp_path, tickers)
     top = json.loads((out / h5y.HARVEST_MANIFEST).read_text())
-    assert top["admissible_use"] == "research_descriptive_only"
+    assert top["pit_classification"] == "research_descriptive_only"
     assert top["pit_provenance"] == "vendor_current_values_no_revision_identity"
     # The note must carry the operative caveats: restatement risk and the
     # admissible confirmatory path (genuine filing timestamps / SEC EDGAR,
@@ -510,10 +528,11 @@ def test_pit_stamp_on_every_manifest(tmp_path, tickers):
         assert needle in note, f"pit_note missing {needle!r}"
     for name in top["targets"]:
         child = json.loads((out / f"{name}.manifest.json").read_text())
-        assert child["admissible_use"] == top["admissible_use"]
+        assert child["pit_classification"] == top["pit_classification"]
         assert child["pit_provenance"] == top["pit_provenance"]
         assert child["schema_version"] == h5y.SCHEMA_VERSION
         assert child["harvester_version"] == h5y.HARVESTER_VERSION
+        assert set(h5y.REQUIRED_ROW_COLUMNS) <= set(child["schema_columns"])
 
 
 # --- 12. CLI surfacing of verify_failed --------------------------------------------------
