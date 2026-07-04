@@ -338,41 +338,47 @@ def load_lake(snapshot_root: Path, days: Sequence[date]) -> tuple[
     for day in days:
         day_dir = snapshot_root / day.isoformat()
 
-        df = pd.read_parquet(day_dir / "analyst_estimates.parquet")
-        for sym, grp in df.groupby("symbol"):
-            se = est.setdefault(str(sym), _SymbolEstimates())
-            fiscal_rows: dict[date, tuple] = {}
-            for rec in grp.itertuples(index=False):
-                fe = _to_date(getattr(rec, "date", None))
-                if fe is None:
+        est_path = day_dir / "analyst_estimates.parquet"
+        if est_path.is_file():
+            df = pd.read_parquet(est_path)
+            for sym, grp in df.groupby("symbol"):
+                se = est.setdefault(str(sym), _SymbolEstimates())
+                fiscal_rows: dict[date, tuple] = {}
+                for rec in grp.itertuples(index=False):
+                    fe = _to_date(getattr(rec, "date", None))
+                    if fe is None:
+                        continue
+                    fiscal_rows[fe] = (
+                        _float_or_none(getattr(rec, "epsAvg", None)),
+                        _float_or_none(getattr(rec, "epsHigh", None)),
+                        _float_or_none(getattr(rec, "epsLow", None)),
+                        _float_or_none(getattr(rec, "numAnalystsEps", None)),
+                    )
+                if fiscal_rows:
+                    se.snaps.append(day)
+                    se.rows[day] = fiscal_rows
+
+        tgt_path = day_dir / "price_target_consensus.parquet"
+        if tgt_path.is_file():
+            df = pd.read_parquet(tgt_path)
+            for rec in df.itertuples(index=False):
+                v = _float_or_none(getattr(rec, "targetConsensus", None))
+                if v is None:
                     continue
-                fiscal_rows[fe] = (
-                    _float_or_none(getattr(rec, "epsAvg", None)),
-                    _float_or_none(getattr(rec, "epsHigh", None)),
-                    _float_or_none(getattr(rec, "epsLow", None)),
-                    _float_or_none(getattr(rec, "numAnalystsEps", None)),
-                )
-            if fiscal_rows:
-                se.snaps.append(day)
-                se.rows[day] = fiscal_rows
+                ss = tgt.setdefault(str(rec.symbol), _SymbolSeries())
+                ss.snaps.append(day)
+                ss.values[day] = v
 
-        df = pd.read_parquet(day_dir / "price_target_consensus.parquet")
-        for rec in df.itertuples(index=False):
-            v = _float_or_none(getattr(rec, "targetConsensus", None))
-            if v is None:
-                continue
-            ss = tgt.setdefault(str(rec.symbol), _SymbolSeries())
-            ss.snaps.append(day)
-            ss.values[day] = v
-
-        df = pd.read_parquet(day_dir / "grades_consensus.parquet")
-        for rec in df.itertuples(index=False):
-            score = _grade_score(rec)
-            if score is None:
-                continue
-            ss = grd.setdefault(str(rec.symbol), _SymbolSeries())
-            ss.snaps.append(day)
-            ss.values[day] = score
+        grd_path = day_dir / "grades_consensus.parquet"
+        if grd_path.is_file():
+            df = pd.read_parquet(grd_path)
+            for rec in df.itertuples(index=False):
+                score = _grade_score(rec)
+                if score is None:
+                    continue
+                ss = grd.setdefault(str(rec.symbol), _SymbolSeries())
+                ss.snaps.append(day)
+                ss.values[day] = score
 
     return est, tgt, grd
 
