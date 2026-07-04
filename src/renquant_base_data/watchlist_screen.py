@@ -5,7 +5,6 @@ import argparse
 import json
 import logging
 import math
-import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -91,20 +90,11 @@ def load_strategy_config(path: str | Path) -> dict[str, Any]:
 
 
 def notify(title: str, body: str, *, topic: str = NTFY_TOPIC) -> None:
-    if os.environ.get("RENQUANT_NO_NOTIFY") == "1":
-        log.info("[ntfy suppressed] %s: %s", title, body)
-        return
-    try:
-        import urllib.request
+    """Canonical ``renquant_common.notify`` sender (campaign B6 re-point).
+    RENQUANT_NO_NOTIFY suppression and the never-raise guarantee live there."""
+    from renquant_common.notify import send
 
-        request = urllib.request.Request(
-            f"https://ntfy.sh/{topic}",
-            data=body.encode("utf-8"),
-            headers={"Title": title},
-        )
-        urllib.request.urlopen(request, timeout=5).close()
-    except Exception as exc:  # noqa: BLE001
-        log.warning("ntfy failed: %s", exc)
+    send(title, body, topic)
 
 
 def screen_watchlist(
