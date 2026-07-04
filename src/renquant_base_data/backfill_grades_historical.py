@@ -56,10 +56,6 @@ FMP_STABLE_BASE = "https://financialmodelingprep.com/stable"
 GRADES_HISTORICAL_EP = "grades-historical"
 
 DEFAULT_OUT = "data/estimate_snapshots"
-DEFAULT_ENV = Path("/Users/renhao/git/github/RenQuant/.env")
-DEFAULT_UNIVERSE_CONFIG = Path(
-    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/strategy_config.golden.json"
-)
 REQUEST_TIMEOUT_S = 30
 THROTTLE_S = 0.25
 DEFAULT_MIN_COVERAGE = 0.80
@@ -87,12 +83,22 @@ def _read_env_value(env_path: Path, key: str) -> str | None:
     return None
 
 
-def load_api_key(env_path: Path) -> str | None:
-    return os.environ.get("FMP_API_KEY") or _read_env_value(env_path, "FMP_API_KEY")
+def load_api_key(env_path: Path | None = None) -> str | None:
+    key = os.environ.get("FMP_API_KEY")
+    if key:
+        return key
+    if env_path is not None:
+        return _read_env_value(env_path, "FMP_API_KEY")
+    return None
 
 
 def load_universe(universe_arg: str | None) -> list[str]:
-    path = Path(universe_arg) if universe_arg else DEFAULT_UNIVERSE_CONFIG
+    if universe_arg is None:
+        raise ValueError(
+            "--universe is required: pass a strategy_config.json or a "
+            "plain-text ticker file (one ticker per line)"
+        )
+    path = Path(universe_arg)
     if not path.exists():
         raise FileNotFoundError(f"universe source not found: {path}")
     text = path.read_text()
@@ -293,8 +299,16 @@ def main(argv: list[str] | None = None) -> int:
         description="Backfill grades-historical PIT snapshots from FMP"
     )
     parser.add_argument("--out", default=DEFAULT_OUT, help="snapshot output root")
-    parser.add_argument("--universe", help="watchlist file or strategy_config.json")
-    parser.add_argument("--env", default=str(DEFAULT_ENV), help=".env file for FMP key")
+    parser.add_argument(
+        "--universe",
+        required=True,
+        help="watchlist file or strategy_config.json (required)",
+    )
+    parser.add_argument(
+        "--env",
+        default=None,
+        help=".env file for FMP key (or set FMP_API_KEY env var)",
+    )
     parser.add_argument(
         "--execute",
         action="store_true",
@@ -310,9 +324,13 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    api_key = load_api_key(Path(args.env))
+    env_path = Path(args.env) if args.env else None
+    api_key = load_api_key(env_path)
     if not api_key:
-        print("error: FMP_API_KEY not found", file=sys.stderr)
+        print(
+            "error: FMP_API_KEY not found. Set the env var or pass --env <path>",
+            file=sys.stderr,
+        )
         return 1
 
     tickers = load_universe(args.universe)
@@ -334,14 +352,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Status: {result['status']}")
         print(f"Coverage: {result['tickers_ok']}/{result['tickers_total']} "
               f"({result['coverage']:.1%})")
-        print(f"Months: {result['months_total']} total, "
-              f"{result['months_written']} {'written' if args.execute else 'would write'}, "
-              f"{result['months_skipped']} skipped")
-        if result.get("date_range"):
-            print(f"Range: {result['date_range'][0]} -> {result['date_range'][1]}")
-        if not args.execute and result["months_written"] > 0:
-            print("\nDry run. Pass --execute to write.")
+        if result["status"] != "error":
+            print(f"Months: {result['months_total']} total, "
+                  f"{result['months_written']} {'written' if args.execute else 'would write'}, "
+                  f"{result['months_skipped']} skipped")
+            if result.get("date_range"):
+                print(f"Range: {result['date_range'][0]} -> {result['date_range'][1]}")
+            if not args.execute and result["months_written"] > 0:
+                print("\nDry run. Pass --execute to write.")
 
+    if result["status"] == "error":
+        return 1
     return 0
 
 
