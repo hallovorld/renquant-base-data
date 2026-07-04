@@ -53,25 +53,24 @@ live forward snapshots.
 
 **Hard-coded machine-specific paths.** `DEFAULT_ENV`/`DEFAULT_UNIVERSE_CONFIG`
 were hard-coded to `/Users/renhao/git/github/RenQuant/...`, making the CLI
-non-portable to CI or any other checkout location. Fixed by adding
-`default_github_root()`/`default_repo_root()`/`default_env_path()`/
-`default_universe_config()`, mirroring `renquant-orchestrator`'s
-`runtime_paths.py` resolver exactly (same `RENQUANT_GITHUB_ROOT`/
-`RENQUANT_REPO_ROOT` env vars, same `__file__`-relative fallback) so both
-repos agree on one machine's sibling-checkout layout without hard-coding it.
+non-portable to CI or any other checkout location. Fixed by removing the
+hard-coded defaults entirely: `--universe` is now a required argument (no
+silent fallback to one workstation's `strategy_config.golden.json`), and
+`load_api_key()` checks the `FMP_API_KEY` env var first, falling back to
+`--env <path>` only if explicitly given — no path is ever assumed.
 
 **Exit code 0 on rejected backfill.** `main()` unconditionally returned 0 even
 when `backfill()` returned `{"status": "error", "reason": "below_coverage_floor", ...}`
 — a CI/cron caller would see shell-success on a hard safety rejection unless it
 re-parsed stdout. Fixed: `main()` now returns 1 whenever `result["status"] ==
-"error"` (the only error status `backfill()` produces), in both the `--json`
-and human-readable output paths. Also fixed a latent crash in the
-human-readable printer: it unconditionally accessed `result["months_total"]`
-etc., keys the error-status dict doesn't have — now the error branch prints
-just status/coverage/reason and skips the fields that don't exist on that path.
+"error"`, in both the `--json` and human-readable output paths (the
+human-readable branch also stopped unconditionally accessing
+`result["months_total"]` etc. on the error path, where those keys don't exist).
 
-Added 4 tests: two confirming non-zero exit on the coverage-floor rejection
-(JSON and human-readable), two confirming the default paths never reference a
-hardcoded home directory and correctly respect the env-var override. Verified
-both exit-code tests genuinely fail against the pre-fix `return 0` and pass
-after. 20/20 backfill tests, 266/266 relevant repo tests pass.
+(This exact pair of fixes was independently implemented twice — once here,
+once by a concurrent session that pushed to this same branch first. Reconciled
+by taking the concurrent session's implementation as canonical, since it's
+equally correct and simpler — required `--universe` instead of introducing a
+parallel env-var-derived resolver — rather than merging two solutions to the
+same problem. See `test_cli_coverage_failure_returns_nonzero` for the
+regression coverage.)

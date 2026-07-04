@@ -240,17 +240,16 @@ def test_load_universe_txt(tmp_path):
 
 
 def test_cli_dry_run(tmp_path, capsys):
+    universe = tmp_path / "tickers.txt"
+    universe.write_text("AAPL\nGOOG\n")
     with patch(
         "renquant_base_data.backfill_grades_historical.fetch_grades_historical",
         side_effect=_mock_fetch,
     ), patch(
         "renquant_base_data.backfill_grades_historical.load_api_key",
         return_value="fake",
-    ), patch(
-        "renquant_base_data.backfill_grades_historical.load_universe",
-        return_value=["AAPL", "GOOG"],
     ):
-        rc = main(["--out", str(tmp_path)])
+        rc = main(["--out", str(tmp_path), "--universe", str(universe)])
     assert rc == 0
     out = capsys.readouterr().out
     assert "Dry run" in out
@@ -258,113 +257,52 @@ def test_cli_dry_run(tmp_path, capsys):
 
 
 def test_cli_json_output(tmp_path, capsys):
+    universe = tmp_path / "tickers.txt"
+    universe.write_text("AAPL\nGOOG\n")
     with patch(
         "renquant_base_data.backfill_grades_historical.fetch_grades_historical",
         side_effect=_mock_fetch,
     ), patch(
         "renquant_base_data.backfill_grades_historical.load_api_key",
         return_value="fake",
-    ), patch(
-        "renquant_base_data.backfill_grades_historical.load_universe",
-        return_value=["AAPL", "GOOG"],
     ):
-        rc = main(["--out", str(tmp_path), "--json"])
+        rc = main(["--out", str(tmp_path), "--json", "--universe", str(universe)])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert data["status"] == "dry_run"
     assert data["months_total"] == 3
 
 
-def test_cli_no_api_key(capsys):
+def test_cli_no_api_key(tmp_path, capsys):
+    universe = tmp_path / "tickers.txt"
+    universe.write_text("AAPL\n")
     with patch(
         "renquant_base_data.backfill_grades_historical.load_api_key",
         return_value=None,
     ):
-        rc = main(["--out", "/tmp/x"])
+        rc = main(["--out", "/tmp/x", "--universe", str(universe)])
     assert rc == 1
 
 
-def test_cli_exit_nonzero_on_below_coverage_floor(tmp_path, capsys):
-    """A rejected (below-coverage-floor) backfill must fail the shell contract,
-    not print an error status and still return 0 (that's a false CI-green)."""
-    error_result = {
-        "status": "error",
-        "reason": "below_coverage_floor",
-        "coverage": 0.1,
-        "tickers_ok": 1,
-        "tickers_total": 10,
-    }
+def test_cli_coverage_failure_returns_nonzero(tmp_path, capsys):
+    """Coverage-floor abort must exit non-zero, not 0."""
+    universe = tmp_path / "tickers.txt"
+    universe.write_text("AAPL\nGOOG\n")
+
+    def fail_fetch(ticker, api_key, **kw):
+        return []
+
     with patch(
+        "renquant_base_data.backfill_grades_historical.fetch_grades_historical",
+        side_effect=fail_fetch,
+    ), patch(
         "renquant_base_data.backfill_grades_historical.load_api_key",
         return_value="fake",
-    ), patch(
-        "renquant_base_data.backfill_grades_historical.load_universe",
-        return_value=["A", "B"],
-    ), patch(
-        "renquant_base_data.backfill_grades_historical.backfill",
-        return_value=error_result,
     ):
-        rc = main(["--out", str(tmp_path)])
-    assert rc != 0
-    out, err = capsys.readouterr()
-    assert "below_coverage_floor" in out + err
-
-
-def test_cli_json_exit_nonzero_on_below_coverage_floor(tmp_path, capsys):
-    error_result = {
-        "status": "error",
-        "reason": "below_coverage_floor",
-        "coverage": 0.1,
-        "tickers_ok": 1,
-        "tickers_total": 10,
-    }
-    with patch(
-        "renquant_base_data.backfill_grades_historical.load_api_key",
-        return_value="fake",
-    ), patch(
-        "renquant_base_data.backfill_grades_historical.load_universe",
-        return_value=["A", "B"],
-    ), patch(
-        "renquant_base_data.backfill_grades_historical.backfill",
-        return_value=error_result,
-    ):
-        rc = main(["--out", str(tmp_path), "--json"])
-    assert rc != 0
-    data = json.loads(capsys.readouterr().out)
-    assert data["status"] == "error"
-
-
-def test_default_paths_have_no_hardcoded_home_directory(monkeypatch):
-    """Path resolution must not depend on one developer's workstation layout."""
-    from renquant_base_data.backfill_grades_historical import (
-        default_env_path,
-        default_github_root,
-        default_repo_root,
-        default_universe_config,
-    )
-
-    monkeypatch.delenv("RENQUANT_GITHUB_ROOT", raising=False)
-    monkeypatch.delenv("RENQUANT_REPO_ROOT", raising=False)
-
-    assert "renhao" not in str(default_github_root())
-    assert "renhao" not in str(default_repo_root())
-    assert "renhao" not in str(default_env_path())
-    assert "renhao" not in str(default_universe_config())
-
-
-def test_default_paths_respect_env_override(monkeypatch, tmp_path):
-    from renquant_base_data.backfill_grades_historical import (
-        default_env_path,
-        default_repo_root,
-        default_universe_config,
-    )
-
-    monkeypatch.setenv("RENQUANT_REPO_ROOT", str(tmp_path))
-    assert default_repo_root() == tmp_path
-    assert default_env_path() == tmp_path / ".env"
-    assert default_universe_config() == (
-        tmp_path / "backtesting" / "renquant_104" / "strategy_config.golden.json"
-    )
+        rc = main(["--out", str(tmp_path), "--universe", str(universe), "--execute"])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "error" in out.lower()
 
 
 def test_pit_feature_builder_reads_backfilled_snapshots(tmp_path):

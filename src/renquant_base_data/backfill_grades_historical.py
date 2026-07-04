@@ -55,9 +55,6 @@ log = logging.getLogger("renquant_base_data.backfill_grades_historical")
 FMP_STABLE_BASE = "https://financialmodelingprep.com/stable"
 GRADES_HISTORICAL_EP = "grades-historical"
 
-GITHUB_ROOT_ENV = "RENQUANT_GITHUB_ROOT"
-REPO_ROOT_ENV = "RENQUANT_REPO_ROOT"
-
 DEFAULT_OUT = "data/estimate_snapshots"
 REQUEST_TIMEOUT_S = 30
 THROTTLE_S = 0.25
@@ -70,31 +67,6 @@ _COLUMN_MAP = {
     "analystRatingsSell": "sell",
     "analystRatingsStrongSell": "strongSell",
 }
-
-
-def default_github_root() -> Path:
-    """Checkout parent for sibling RenQuant repos (mirrors renquant-orchestrator's
-    runtime_paths.default_github_root — same env var, same __file__-relative
-    fallback, so both repos agree on one machine's checkout layout)."""
-    if raw := os.environ.get(GITHUB_ROOT_ENV):
-        return Path(raw).expanduser().resolve()
-    return Path(__file__).resolve().parents[3]
-
-
-def default_repo_root() -> Path:
-    """Umbrella (RenQuant) checkout root, derived from the sibling-repo parent
-    unless overridden."""
-    if raw := os.environ.get(REPO_ROOT_ENV):
-        return Path(raw).expanduser().resolve()
-    return default_github_root() / "RenQuant"
-
-
-def default_env_path() -> Path:
-    return default_repo_root() / ".env"
-
-
-def default_universe_config() -> Path:
-    return default_repo_root() / "backtesting" / "renquant_104" / "strategy_config.golden.json"
 
 
 def _read_env_value(env_path: Path, key: str) -> str | None:
@@ -111,12 +83,22 @@ def _read_env_value(env_path: Path, key: str) -> str | None:
     return None
 
 
-def load_api_key(env_path: Path) -> str | None:
-    return os.environ.get("FMP_API_KEY") or _read_env_value(env_path, "FMP_API_KEY")
+def load_api_key(env_path: Path | None = None) -> str | None:
+    key = os.environ.get("FMP_API_KEY")
+    if key:
+        return key
+    if env_path is not None:
+        return _read_env_value(env_path, "FMP_API_KEY")
+    return None
 
 
 def load_universe(universe_arg: str | None) -> list[str]:
-    path = Path(universe_arg) if universe_arg else default_universe_config()
+    if universe_arg is None:
+        raise ValueError(
+            "--universe is required: pass a strategy_config.json or a "
+            "plain-text ticker file (one ticker per line)"
+        )
+    path = Path(universe_arg)
     if not path.exists():
         raise FileNotFoundError(f"universe source not found: {path}")
     text = path.read_text()
@@ -317,11 +299,15 @@ def main(argv: list[str] | None = None) -> int:
         description="Backfill grades-historical PIT snapshots from FMP"
     )
     parser.add_argument("--out", default=DEFAULT_OUT, help="snapshot output root")
-    parser.add_argument("--universe", help="watchlist file or strategy_config.json")
     parser.add_argument(
-        "--env", default=None,
-        help=".env file for FMP key (default: derived from "
-             f"${GITHUB_ROOT_ENV}/${REPO_ROOT_ENV}, or the sibling-repo checkout root)",
+        "--universe",
+        required=True,
+        help="watchlist file or strategy_config.json (required)",
+    )
+    parser.add_argument(
+        "--env",
+        default=None,
+        help=".env file for FMP key (or set FMP_API_KEY env var)",
     )
     parser.add_argument(
         "--execute",
@@ -338,10 +324,13 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    env_path = Path(args.env) if args.env else default_env_path()
+    env_path = Path(args.env) if args.env else None
     api_key = load_api_key(env_path)
     if not api_key:
-        print("error: FMP_API_KEY not found", file=sys.stderr)
+        print(
+            "error: FMP_API_KEY not found. Set the env var or pass --env <path>",
+            file=sys.stderr,
+        )
         return 1
 
     tickers = load_universe(args.universe)
@@ -363,9 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Status: {result['status']}")
         print(f"Coverage: {result['tickers_ok']}/{result['tickers_total']} "
               f"({result['coverage']:.1%})")
-        if result["status"] == "error":
-            print(f"Error: {result.get('reason', 'unknown')}", file=sys.stderr)
-        else:
+        if result["status"] != "error":
             print(f"Months: {result['months_total']} total, "
                   f"{result['months_written']} {'written' if args.execute else 'would write'}, "
                   f"{result['months_skipped']} skipped")
@@ -374,7 +361,9 @@ def main(argv: list[str] | None = None) -> int:
             if not args.execute and result["months_written"] > 0:
                 print("\nDry run. Pass --execute to write.")
 
-    return 1 if result["status"] == "error" else 0
+    if result["status"] == "error":
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
