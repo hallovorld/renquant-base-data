@@ -9,7 +9,7 @@ description = "Data manifests and validation workflows for RenQuant."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "renquant-common>=0.6,<1.0",
+  "renquant-common>=0.10,<1.0",  # market_calendar (campaign B5)
   "numpy>=1.24",
   "pandas>=2.0",
   "requests>=2.31",
