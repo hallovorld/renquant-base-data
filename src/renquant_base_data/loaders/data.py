@@ -1,6 +1,8 @@
 """OHLCV data fetching with local Parquet cache.
 
-Self-contained — no common/ imports.
+Session-calendar semantics come from the canonical
+``renquant_common.market_calendar`` (campaign B5); everything else here is
+self-contained.
 """
 from __future__ import annotations
 
@@ -32,27 +34,24 @@ def _market_timestamp(value=None) -> pd.Timestamp:
 
 
 def _last_completed_nyse_session(ref_ts: pd.Timestamp):
-    """Most recent completed NYSE session as of ref_ts."""
+    """Most recent completed NYSE session as of ref_ts.
+
+    Campaign B5 (audit #296 XC-2): delegates to the canonical
+    :func:`renquant_common.market_calendar.last_completed_session`
+    (equivalence-proven on a 10-year fixture against the hand-copy that
+    lived here — the copy orchestrator's freshness guard "mirrored" and had
+    already diverged from, 16d vs 14d lookback). The canonical is
+    fail-closed (raises); THIS call-site is the explicitly-lenient wrap —
+    swallow to ``None`` so the caller's conservative 2-calendar-day
+    staleness cap takes over when the calendar backend (or a stale
+    renquant_common install predating market_calendar) is unavailable,
+    exactly the pre-B5 posture."""
     try:
-        import pandas_market_calendars as mcal  # noqa: PLC0415
-        cal = mcal.get_calendar("NYSE")
-        ref_date = ref_ts.date()
-        sched = cal.schedule(
-            start_date=ref_date - pd.Timedelta(days=14),
-            end_date=ref_date,
+        from renquant_common.market_calendar import (  # noqa: PLC0415
+            last_completed_session,
         )
-        todays_session = sched[sched.index.date == ref_date]
-        if not todays_session.empty:
-            close = pd.Timestamp(todays_session["market_close"].iloc[-1])
-            if close.tzinfo is None:
-                close = close.tz_localize("UTC")
-            close_ny = close.tz_convert("America/New_York")
-            if ref_ts >= close_ny:
-                return ref_date
-        sched_before = sched[sched.index.date < ref_date]
-        if sched_before.empty:
-            return None
-        return sched_before.index[-1].date()
+
+        return last_completed_session(ref_ts)
     except Exception:
         return None
 
