@@ -19,6 +19,25 @@ import numpy as np
 import pandas as pd
 from renquant_common import Job, Pipeline, Task, run_parallel
 
+# Feature operators live in the ONE shared train/serve module (campaign B8).
+# The serve side (renquant_pipeline .../alpha158_features.py) imports the
+# SAME objects; tests/test_alpha158_ops.py pins the identity. Underscore
+# aliases preserve this module's historical API.
+from .alpha158_ops import (
+    EPS,
+    STD_DDOF,
+    WINDOWS,
+    greater as _greater,
+    idx_max_n as _idx_max_n,
+    idx_min_n as _idx_min_n,
+    kbar_features,
+    less as _less,
+    price_features,
+    resi as _resi,
+    rolling_features,
+    rsquare as _rsquare,
+    slope as _slope,
+)
 from .track_b_features import (
     TRACK_B_FEATURES,
     add_track_b_features,
@@ -37,10 +56,8 @@ for _key in (
 
 log = logging.getLogger("renquant_base_data.alpha158_qlib_panel")
 
-WINDOWS = [5, 10, 20, 30, 60]
-EPS = 1e-12
+# WINDOWS / EPS / STD_DDOF are re-exported from .alpha158_ops above.
 MAX_SPY_LABEL_FFILL_DAYS = 5
-STD_DDOF = 1
 MIN_OHLCV_ROWS = 70
 EXPECTED_ALPHA158_FEATURES = 158
 
@@ -129,69 +146,6 @@ def _resolve_path(path: Path | str | None, default: Path) -> Path:
     return Path(path).expanduser().resolve() if path is not None else default.expanduser().resolve()
 
 
-def _slope(s: pd.Series, n: int) -> pd.Series:
-    x_mean = (n - 1) / 2.0
-    var_x = sum((i - x_mean) ** 2 for i in range(n))
-
-    def slope_fn(arr: np.ndarray) -> float:
-        if np.isnan(arr).any():
-            return np.nan
-        y_mean = arr.mean()
-        return sum((i - x_mean) * (arr[i] - y_mean) for i in range(n)) / var_x
-
-    return s.rolling(n).apply(slope_fn, raw=True)
-
-
-def _rsquare(s: pd.Series, n: int) -> pd.Series:
-    x_mean = (n - 1) / 2.0
-    var_x = sum((i - x_mean) ** 2 for i in range(n))
-
-    def rsq_fn(arr: np.ndarray) -> float:
-        if np.isnan(arr).any():
-            return np.nan
-        y_mean = arr.mean()
-        ss_tot = ((arr - y_mean) ** 2).sum()
-        if ss_tot < EPS:
-            return np.nan
-        slope = sum((i - x_mean) * (arr[i] - y_mean) for i in range(n)) / var_x
-        intercept = y_mean - slope * x_mean
-        ss_res = sum((arr[i] - intercept - slope * i) ** 2 for i in range(n))
-        return 1.0 - ss_res / ss_tot
-
-    return s.rolling(n).apply(rsq_fn, raw=True)
-
-
-def _resi(s: pd.Series, n: int) -> pd.Series:
-    x_mean = (n - 1) / 2.0
-    var_x = sum((i - x_mean) ** 2 for i in range(n))
-
-    def resi_fn(arr: np.ndarray) -> float:
-        if np.isnan(arr).any():
-            return np.nan
-        y_mean = arr.mean()
-        slope = sum((i - x_mean) * (arr[i] - y_mean) for i in range(n)) / var_x
-        intercept = y_mean - slope * x_mean
-        return arr[-1] - intercept - slope * (n - 1)
-
-    return s.rolling(n).apply(resi_fn, raw=True)
-
-
-def _idx_max_n(s: pd.Series, n: int) -> pd.Series:
-    return s.rolling(n).apply(lambda x: float(np.argmax(x)), raw=True)
-
-
-def _idx_min_n(s: pd.Series, n: int) -> pd.Series:
-    return s.rolling(n).apply(lambda x: float(np.argmin(x)), raw=True)
-
-
-def _greater(a: pd.Series, b: pd.Series) -> pd.Series:
-    return pd.concat([a, b], axis=1).max(axis=1)
-
-
-def _less(a: pd.Series, b: pd.Series) -> pd.Series:
-    return pd.concat([a, b], axis=1).min(axis=1)
-
-
 def _load_ohlcv(path: Path) -> pd.DataFrame:
     df = pd.read_parquet(path)
     if df.empty:
@@ -210,100 +164,6 @@ def _load_ohlcv(path: Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"{path} missing OHLCV columns: {missing}")
     return df[required]
-
-
-def kbar_features(df: pd.DataFrame) -> dict[str, pd.Series]:
-    o, h, l, c = df["open"], df["high"], df["low"], df["close"]
-    span = (h - l) + EPS
-    g_oc = _greater(o, c)
-    l_oc = _less(o, c)
-    return {
-        "KMID": (c - o) / o,
-        "KLEN": (h - l) / o,
-        "KMID2": (c - o) / span,
-        "KUP": (h - g_oc) / o,
-        "KUP2": (h - g_oc) / span,
-        "KLOW": (l_oc - l) / o,
-        "KLOW2": (l_oc - l) / span,
-        "KSFT": (2 * c - h - l) / o,
-        "KSFT2": (2 * c - h - l) / span,
-    }
-
-
-def price_features(df: pd.DataFrame) -> dict[str, pd.Series]:
-    c = df["close"]
-    vwap = (df["open"] + df["high"] + df["low"] + df["close"]) / 4.0
-    return {
-        "OPEN0": df["open"] / c,
-        "HIGH0": df["high"] / c,
-        "LOW0": df["low"] / c,
-        "VWAP0": vwap / c,
-    }
-
-
-def rolling_features(df: pd.DataFrame) -> dict[str, pd.Series]:
-    c = df["close"].astype(float)
-    h = df["high"].astype(float)
-    l = df["low"].astype(float)
-    v = df["volume"].astype(float)
-
-    c_lag1 = c.shift(1)
-    c_diff = c - c_lag1
-    abs_c_diff = c_diff.abs()
-    log_v = np.log(v + 1)
-    c_ret = c / c_lag1 - 1
-    abs_c_ret = c_ret.abs()
-    c_ret_norm = c / c_lag1
-    v_ret_norm = v / v.shift(1)
-    log_v_ret = np.log(v_ret_norm + 1)
-    v_diff = v - v.shift(1)
-    abs_v_diff = v_diff.abs()
-
-    out: dict[str, pd.Series] = {}
-    for n in WINDOWS:
-        out[f"ROC{n}"] = c.shift(n) / c
-        out[f"MA{n}"] = c.rolling(n).mean() / c
-        out[f"STD{n}"] = c.rolling(n).std(ddof=STD_DDOF) / c
-        out[f"BETA{n}"] = _slope(c, n) / c
-        out[f"RSQR{n}"] = _rsquare(c, n)
-        out[f"RESI{n}"] = _resi(c, n) / c
-        out[f"MAX{n}"] = h.rolling(n).max() / c
-        out[f"MIN{n}"] = l.rolling(n).min() / c
-        out[f"QTLU{n}"] = c.rolling(n).quantile(0.8) / c
-        out[f"QTLD{n}"] = c.rolling(n).quantile(0.2) / c
-        out[f"RANK{n}"] = c.rolling(n).rank(pct=True)
-        out[f"RSV{n}"] = (c - l.rolling(n).min()) / (h.rolling(n).max() - l.rolling(n).min() + EPS)
-        out[f"IMAX{n}"] = _idx_max_n(h, n) / n
-        out[f"IMIN{n}"] = _idx_min_n(l, n) / n
-        out[f"IMXD{n}"] = (_idx_max_n(h, n) - _idx_min_n(l, n)) / n
-        out[f"CORR{n}"] = c.rolling(n).corr(log_v)
-        out[f"CORD{n}"] = c_ret_norm.rolling(n).corr(log_v_ret)
-        out[f"CNTP{n}"] = (c > c_lag1).astype(float).rolling(n).mean()
-        out[f"CNTN{n}"] = (c < c_lag1).astype(float).rolling(n).mean()
-        out[f"CNTD{n}"] = out[f"CNTP{n}"] - out[f"CNTN{n}"]
-
-        pos_ret = c_diff.clip(lower=0)
-        neg_ret = (-c_diff).clip(lower=0)
-        sum_abs = abs_c_diff.rolling(n).sum() + EPS
-        out[f"SUMP{n}"] = pos_ret.rolling(n).sum() / sum_abs
-        out[f"SUMN{n}"] = neg_ret.rolling(n).sum() / sum_abs
-        out[f"SUMD{n}"] = out[f"SUMP{n}"] - out[f"SUMN{n}"]
-
-        v_safe = v.where(np.isfinite(v) & (v > 0), v.rolling(20, min_periods=1).mean())
-        v_safe = v_safe.where(np.isfinite(v_safe) & (v_safe > 0), 1.0)
-        out[f"VMA{n}"] = v.rolling(n).mean() / v_safe
-        out[f"VSTD{n}"] = v.rolling(n).std(ddof=STD_DDOF) / v_safe
-
-        wv = abs_c_ret * v
-        out[f"WVMA{n}"] = wv.rolling(n).std(ddof=STD_DDOF) / (wv.rolling(n).mean() + EPS)
-
-        pos_v = v_diff.clip(lower=0)
-        neg_v = (-v_diff).clip(lower=0)
-        sum_abs_v = abs_v_diff.rolling(n).sum() + EPS
-        out[f"VSUMP{n}"] = pos_v.rolling(n).sum() / sum_abs_v
-        out[f"VSUMN{n}"] = neg_v.rolling(n).sum() / sum_abs_v
-        out[f"VSUMD{n}"] = out[f"VSUMP{n}"] - out[f"VSUMN{n}"]
-    return out
 
 
 def build_features_for_ticker(ticker: str, ohlcv_dir: str | Path) -> pd.DataFrame | None:
