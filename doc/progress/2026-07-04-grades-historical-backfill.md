@@ -48,3 +48,30 @@ The grades-historical data is aggregated by FMP on each month — it is NOT
 fabricated or reconstructed by us. Each record's date is the month FMP computed
 it. Manifests stamp `pit_source=grades_historical_backfill` to distinguish from
 live forward snapshots.
+
+## Round 2 (Codex review — two operational bugs)
+
+**Hard-coded machine-specific paths.** `DEFAULT_ENV`/`DEFAULT_UNIVERSE_CONFIG`
+were hard-coded to `/Users/renhao/git/github/RenQuant/...`, making the CLI
+non-portable to CI or any other checkout location. Fixed by adding
+`default_github_root()`/`default_repo_root()`/`default_env_path()`/
+`default_universe_config()`, mirroring `renquant-orchestrator`'s
+`runtime_paths.py` resolver exactly (same `RENQUANT_GITHUB_ROOT`/
+`RENQUANT_REPO_ROOT` env vars, same `__file__`-relative fallback) so both
+repos agree on one machine's sibling-checkout layout without hard-coding it.
+
+**Exit code 0 on rejected backfill.** `main()` unconditionally returned 0 even
+when `backfill()` returned `{"status": "error", "reason": "below_coverage_floor", ...}`
+— a CI/cron caller would see shell-success on a hard safety rejection unless it
+re-parsed stdout. Fixed: `main()` now returns 1 whenever `result["status"] ==
+"error"` (the only error status `backfill()` produces), in both the `--json`
+and human-readable output paths. Also fixed a latent crash in the
+human-readable printer: it unconditionally accessed `result["months_total"]`
+etc., keys the error-status dict doesn't have — now the error branch prints
+just status/coverage/reason and skips the fields that don't exist on that path.
+
+Added 4 tests: two confirming non-zero exit on the coverage-floor rejection
+(JSON and human-readable), two confirming the default paths never reference a
+hardcoded home directory and correctly respect the env-var override. Verified
+both exit-code tests genuinely fail against the pre-fix `return 0` and pass
+after. 20/20 backfill tests, 266/266 relevant repo tests pass.

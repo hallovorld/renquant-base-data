@@ -55,11 +55,10 @@ log = logging.getLogger("renquant_base_data.backfill_grades_historical")
 FMP_STABLE_BASE = "https://financialmodelingprep.com/stable"
 GRADES_HISTORICAL_EP = "grades-historical"
 
+GITHUB_ROOT_ENV = "RENQUANT_GITHUB_ROOT"
+REPO_ROOT_ENV = "RENQUANT_REPO_ROOT"
+
 DEFAULT_OUT = "data/estimate_snapshots"
-DEFAULT_ENV = Path("/Users/renhao/git/github/RenQuant/.env")
-DEFAULT_UNIVERSE_CONFIG = Path(
-    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/strategy_config.golden.json"
-)
 REQUEST_TIMEOUT_S = 30
 THROTTLE_S = 0.25
 DEFAULT_MIN_COVERAGE = 0.80
@@ -71,6 +70,31 @@ _COLUMN_MAP = {
     "analystRatingsSell": "sell",
     "analystRatingsStrongSell": "strongSell",
 }
+
+
+def default_github_root() -> Path:
+    """Checkout parent for sibling RenQuant repos (mirrors renquant-orchestrator's
+    runtime_paths.default_github_root — same env var, same __file__-relative
+    fallback, so both repos agree on one machine's checkout layout)."""
+    if raw := os.environ.get(GITHUB_ROOT_ENV):
+        return Path(raw).expanduser().resolve()
+    return Path(__file__).resolve().parents[3]
+
+
+def default_repo_root() -> Path:
+    """Umbrella (RenQuant) checkout root, derived from the sibling-repo parent
+    unless overridden."""
+    if raw := os.environ.get(REPO_ROOT_ENV):
+        return Path(raw).expanduser().resolve()
+    return default_github_root() / "RenQuant"
+
+
+def default_env_path() -> Path:
+    return default_repo_root() / ".env"
+
+
+def default_universe_config() -> Path:
+    return default_repo_root() / "backtesting" / "renquant_104" / "strategy_config.golden.json"
 
 
 def _read_env_value(env_path: Path, key: str) -> str | None:
@@ -92,7 +116,7 @@ def load_api_key(env_path: Path) -> str | None:
 
 
 def load_universe(universe_arg: str | None) -> list[str]:
-    path = Path(universe_arg) if universe_arg else DEFAULT_UNIVERSE_CONFIG
+    path = Path(universe_arg) if universe_arg else default_universe_config()
     if not path.exists():
         raise FileNotFoundError(f"universe source not found: {path}")
     text = path.read_text()
@@ -294,7 +318,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out", default=DEFAULT_OUT, help="snapshot output root")
     parser.add_argument("--universe", help="watchlist file or strategy_config.json")
-    parser.add_argument("--env", default=str(DEFAULT_ENV), help=".env file for FMP key")
+    parser.add_argument(
+        "--env", default=None,
+        help=".env file for FMP key (default: derived from "
+             f"${GITHUB_ROOT_ENV}/${REPO_ROOT_ENV}, or the sibling-repo checkout root)",
+    )
     parser.add_argument(
         "--execute",
         action="store_true",
@@ -310,7 +338,8 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    api_key = load_api_key(Path(args.env))
+    env_path = Path(args.env) if args.env else default_env_path()
+    api_key = load_api_key(env_path)
     if not api_key:
         print("error: FMP_API_KEY not found", file=sys.stderr)
         return 1
@@ -334,15 +363,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Status: {result['status']}")
         print(f"Coverage: {result['tickers_ok']}/{result['tickers_total']} "
               f"({result['coverage']:.1%})")
-        print(f"Months: {result['months_total']} total, "
-              f"{result['months_written']} {'written' if args.execute else 'would write'}, "
-              f"{result['months_skipped']} skipped")
-        if result.get("date_range"):
-            print(f"Range: {result['date_range'][0]} -> {result['date_range'][1]}")
-        if not args.execute and result["months_written"] > 0:
-            print("\nDry run. Pass --execute to write.")
+        if result["status"] == "error":
+            print(f"Error: {result.get('reason', 'unknown')}", file=sys.stderr)
+        else:
+            print(f"Months: {result['months_total']} total, "
+                  f"{result['months_written']} {'written' if args.execute else 'would write'}, "
+                  f"{result['months_skipped']} skipped")
+            if result.get("date_range"):
+                print(f"Range: {result['date_range'][0]} -> {result['date_range'][1]}")
+            if not args.execute and result["months_written"] > 0:
+                print("\nDry run. Pass --execute to write.")
 
-    return 0
+    return 1 if result["status"] == "error" else 0
 
 
 if __name__ == "__main__":
