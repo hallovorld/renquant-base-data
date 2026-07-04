@@ -72,6 +72,32 @@ EXTENDED_FEATURE_COLS = (
     "ni_growth_yoy",
     "equity_growth",
 )
+# Per-entity fiscal provenance columns stamped on every (ticker, date) row of the
+# daily feeds (ADDITIVE schema; every audited consumer selects columns explicitly,
+# so extra columns are ignored). They exist so freshness gates (renquant-pipeline
+# P-FUND-FRESHNESS and RenQuant scripts/promote_shadow_patchtst.py
+# ``fundamentals_sla_verdict``) can verify QUARTERLY coverage PER ENTITY instead
+# of failing closed as UNVERIFIABLE:
+#   fiscal_period_end  fiscal-period end date of the LATEST filing whose values
+#                      that daily row carries (the ``end`` of the forward-filled
+#                      quarterly snapshot).
+#   available_at       point-in-time date the filing's values became available
+#                      (see AVAILABILITY TIERS in ``build_quarterly_panel``);
+#                      never precedes real availability where a genuine filing
+#                      timestamp exists, and never exceeds the row's ``date``
+#                      (enforced fail-closed by ``validate_pit_provenance``).
+PROVENANCE_COLS = ("fiscal_period_end", "available_at")
+# Days after a fiscal-period end at which a 10-Q/10-K is conservatively assumed
+# filed+available when NO genuine filing timestamp exists (SEC 10-Q deadlines:
+# 40d large-accelerated / 45d accelerated + non-accelerated). Matches the
+# ``filing_lag_days`` convention of the consuming freshness gates. This is an
+# ASSUMPTION tier, never a substitute for a genuine timestamp when one exists.
+FILING_LAG_FALLBACK_DAYS = 45
+# Default location of the FMP fundamentals harvest whose income-statement
+# ``acceptedDate`` backfills availability when SEC frames carry no ``filed``
+# date (the production case: the XBRL frames API returns no filing timestamp).
+DEFAULT_FMP_HARVEST_DIRNAME = "fmp_harvest_5y"
+FMP_INCOME_STATEMENT_GLOB = "income_statement*.parquet"
 
 
 class _MissingFrame:
@@ -96,6 +122,7 @@ class SecFundamentalsConfig:
     alpha_path: Path | None = None
     daily_output: Path | None = None
     extended_output: Path | None = None
+    fmp_harvest_dir: Path | None = None
     dry_run: bool = False
     sleep_sec: float = 0.12
     per_request_sec: float = 30.0
@@ -369,8 +396,86 @@ def build_ticker_cik_map(
     return {str(symbol).upper(): full_map[str(symbol).upper()] for symbol in universe if str(symbol).upper() in full_map}
 
 
-def build_quarterly_panel(raw: pd.DataFrame, cik_to_ticker: dict[int, str] | None = None) -> pd.DataFrame:
-    """Pivot SEC frames data to one PIT row per ticker and period end."""
+def load_fmp_accepted_dates(harvest_dir: str | Path) -> dict[tuple[str, pd.Timestamp], pd.Timestamp]:
+    """PIT availability lookup ``{(ticker, fiscal_period_end) -> available date}``
+    from the FMP fundamentals harvest's income statements.
+
+    C2 same-filing assumption (renquant-orchestrator
+    doc/design/2026-07-02-m-sig-signal-stack-spec.md): the income statement's
+    ``acceptedDate`` is the EDGAR acceptance timestamp of the WHOLE filing
+    (10-K/10-Q), so it stamps availability for every fundamental concept of the
+    same (ticker, fiscal-period end) — balance-sheet items arrive in the same
+    filing.
+
+    Day-granularity PIT rule — never precede real availability: the stamp is
+    ``max(date(acceptedDate), filingDate)``. A post-close acceptance (e.g.
+    18:08 ET) is disseminated the NEXT business day, which FMP already encodes
+    as ``filingDate`` > ``date(acceptedDate)``; taking the max never stamps a
+    filing earlier than either field. Rows whose stamp precedes the fiscal
+    period end (impossible → corrupt vendor row) are DROPPED, not clamped, so
+    they fall through to the conservative ``FILING_LAG_FALLBACK_DAYS`` tier.
+    Duplicate (ticker, period) rows keep the LATEST stamp (never-precedes).
+
+    Missing directory / files / columns -> empty lookup (the caller's fallback
+    tier still applies; this loader must never fail the refresh)."""
+    harvest_dir = Path(harvest_dir).expanduser()
+    out: dict[tuple[str, pd.Timestamp], pd.Timestamp] = {}
+    if not harvest_dir.is_dir():
+        return out
+    for path in sorted(harvest_dir.glob(FMP_INCOME_STATEMENT_GLOB)):
+        try:
+            frame = pd.read_parquet(path)
+        except Exception:  # noqa: BLE001 - corrupt harvest must not kill the refresh
+            log.warning("FMP accepted-dates: unreadable %s; skipping", path)
+            continue
+        if "symbol" not in frame.columns or "date" not in frame.columns \
+                or "acceptedDate" not in frame.columns:
+            continue
+        symbols = frame["symbol"].astype(str).str.upper()
+        period_end = pd.to_datetime(frame["date"], errors="coerce")
+        accepted = pd.to_datetime(frame["acceptedDate"], errors="coerce").dt.normalize()
+        if "filingDate" in frame.columns:
+            filing = pd.to_datetime(frame["filingDate"], errors="coerce")
+            available = pd.concat([accepted, filing], axis=1).max(axis=1)
+        else:
+            available = accepted
+        ok = period_end.notna() & available.notna() & (available >= period_end)
+        n_dropped = int((period_end.notna() & available.notna() & (available < period_end)).sum())
+        if n_dropped:
+            log.warning(
+                "FMP accepted-dates: dropped %d row(s) in %s whose availability "
+                "precedes the fiscal-period end (corrupt; fallback tier applies)",
+                n_dropped, path.name,
+            )
+        for symbol, end, avail in zip(symbols[ok], period_end[ok], available[ok]):
+            key = (symbol, end)
+            prev = out.get(key)
+            if prev is None or avail > prev:
+                out[key] = avail
+    return out
+
+
+def build_quarterly_panel(
+    raw: pd.DataFrame,
+    cik_to_ticker: dict[int, str] | None = None,
+    *,
+    accepted_dates: dict[tuple[str, pd.Timestamp], pd.Timestamp] | None = None,
+) -> pd.DataFrame:
+    """Pivot SEC frames data to one PIT row per ticker and period end.
+
+    AVAILABILITY TIERS for ``available_date`` (each row records its tier in
+    ``available_source``; a tier is only used when every earlier tier has no
+    genuine timestamp):
+      1. ``sec_filed``      max ``filed`` date over the concepts whose values the
+                            row carries — the direct SEC statement of when the
+                            filing landed (frames-API responses usually lack it).
+      2. ``fmp_accepted``   the FMP income-statement ``acceptedDate`` join for the
+                            same (ticker, fiscal-period end) — the C2 same-filing
+                            assumption (see :func:`load_fmp_accepted_dates`).
+      3. ``expected_filing_lag``  period end + ``FILING_LAG_FALLBACK_DAYS`` — the
+                            conservative EXPECTED-availability assumption (never
+                            zero-lag) used only when no genuine timestamp exists.
+    """
     if raw.empty:
         return pd.DataFrame()
     frame = raw.copy()
@@ -400,7 +505,16 @@ def build_quarterly_panel(raw: pd.DataFrame, cik_to_ticker: dict[int, str] | Non
             row[str(concept)] = item["val"]
             if pd.notna(item.get("filed")):
                 selected_filed.append(pd.Timestamp(item["filed"]))
-        row["available_date"] = max(selected_filed) if selected_filed else end_date + pd.Timedelta(days=45)
+        accepted = (accepted_dates or {}).get((str(ticker), pd.Timestamp(end_date)))
+        if selected_filed:
+            row["available_date"] = max(selected_filed)
+            row["available_source"] = "sec_filed"
+        elif accepted is not None:
+            row["available_date"] = pd.Timestamp(accepted)
+            row["available_source"] = "fmp_accepted"
+        else:
+            row["available_date"] = end_date + pd.Timedelta(days=FILING_LAG_FALLBACK_DAYS)
+            row["available_source"] = "expected_filing_lag"
         rows.append(row)
     return pd.DataFrame(rows).sort_values(["ticker", "end"]).reset_index(drop=True)
 
@@ -412,16 +526,34 @@ def forward_fill_to_daily(
     *,
     value_cols: Sequence[str],
 ) -> pd.DataFrame:
+    """As-of forward-fill the quarterly panel onto the daily serving axis.
+
+    Each daily row carries the values of the LATEST filing whose
+    ``available_date`` is on/before that row's ``date`` (``merge_asof``
+    backward — the PIT join). When the quarterly panel has ``end`` /
+    ``available_date`` / ``available_source``, they are carried ADDITIVELY as
+    the per-row provenance columns ``fiscal_period_end`` / ``available_at`` /
+    ``available_source``, so every daily row states WHICH fiscal period it
+    reflects and WHEN that filing became available. Rows before a ticker's
+    first filing keep NaT provenance (nothing is available yet)."""
     if quarterly.empty:
         return pd.DataFrame()
     out: list[pd.DataFrame] = []
     dates = pd.DataFrame({"date": pd.DatetimeIndex(daily_index).sort_values()})
     cols = [col for col in value_cols if col in quarterly.columns]
+    has_period_end = "end" in quarterly.columns
     for ticker in tickers:
-        ticker_q = quarterly[quarterly["ticker"] == str(ticker).upper()].sort_values("available_date")
+        sort_cols = ["available_date", "end"] if has_period_end else ["available_date"]
+        ticker_q = quarterly[quarterly["ticker"] == str(ticker).upper()].sort_values(sort_cols)
         if ticker_q.empty:
             continue
-        updates = ticker_q[["available_date", *cols]].rename(columns={"available_date": "date"})
+        updates = ticker_q[["available_date", *cols]].copy()
+        if has_period_end:
+            updates["fiscal_period_end"] = pd.to_datetime(ticker_q["end"].to_numpy())
+        updates["available_at"] = pd.to_datetime(ticker_q["available_date"].to_numpy())
+        if "available_source" in ticker_q.columns:
+            updates["available_source"] = ticker_q["available_source"].to_numpy()
+        updates = updates.rename(columns={"available_date": "date"})
         updates["date"] = pd.to_datetime(updates["date"])
         updates = updates.drop_duplicates(subset=["date"], keep="last").sort_values("date")
         daily = pd.merge_asof(dates, updates, on="date", direction="backward")
@@ -481,6 +613,13 @@ def compute_derived_features(daily_raw: pd.DataFrame, ohlcv_dir: str | Path) -> 
             result["roe"] = ni / (equity + 1e-9)
             result["asset_growth"] = assets.pct_change(periods=252).clip(-0.99, 5.0)
         result = result.replace([np.inf, -np.inf], np.nan)
+        # Carry the per-row fiscal provenance (ADDITIVE) so the serving feed
+        # states which fiscal period each row reflects and when it became
+        # available — the columns the P-FUND-FRESHNESS / promote-gate quarterly
+        # verification requires to exist per entity.
+        for col in (*PROVENANCE_COLS, "available_source"):
+            if col in merged.columns:
+                result[col] = merged[col]
         rows.append(result.reset_index().rename(columns={"index": "date"}))
     if not rows:
         return pd.DataFrame()
@@ -533,6 +672,44 @@ def robust_zscore_train_window(
     return out
 
 
+def validate_pit_provenance(frame: pd.DataFrame) -> None:
+    """Fail CLOSED on any point-in-time violation in the provenance columns.
+
+    Invariants (rows with NaT provenance — before a ticker's first filing —
+    are exempt; the gates count those entities as MISSING, never as fresh):
+      1. ``available_at <= date``: a row must never carry values from a filing
+         that was not yet available on that serving date.
+      2. ``fiscal_period_end <= available_at``: a filing cannot be available
+         before the fiscal period it reports on has ended.
+    """
+    if "available_at" not in frame.columns:
+        return
+    date = pd.to_datetime(frame["date"], errors="coerce")
+    available = pd.to_datetime(frame["available_at"], errors="coerce")
+    lookahead = available.notna() & date.notna() & (available > date)
+    if bool(lookahead.any()):
+        raise RuntimeError(
+            f"PIT violation: {int(lookahead.sum())} row(s) carry an available_at "
+            "AFTER the serving date (look-ahead); refusing to write the feed"
+        )
+    if "fiscal_period_end" in frame.columns:
+        period_end = pd.to_datetime(frame["fiscal_period_end"], errors="coerce")
+        impossible = available.notna() & period_end.notna() & (available < period_end)
+        if bool(impossible.any()):
+            raise RuntimeError(
+                f"PIT violation: {int(impossible.sum())} row(s) claim availability "
+                "BEFORE their fiscal-period end (impossible); refusing to write the feed"
+            )
+
+
+def resolve_fmp_harvest_dir(
+    data_dir: str | Path, fmp_harvest_dir: str | Path | None = None
+) -> Path:
+    if fmp_harvest_dir is not None:
+        return Path(fmp_harvest_dir).expanduser()
+    return Path(data_dir).expanduser() / DEFAULT_FMP_HARVEST_DIRNAME
+
+
 def build_daily_fundamentals(
     *,
     raw: pd.DataFrame,
@@ -541,10 +718,12 @@ def build_daily_fundamentals(
     data_dir: str | Path,
     alpha_path: str | Path | None = None,
     output_path: str | Path | None = None,
+    fmp_harvest_dir: str | Path | None = None,
 ) -> Path:
     data_dir = Path(data_dir).expanduser().resolve()
     out = Path(output_path).expanduser().resolve() if output_path else data_dir / DEFAULT_DAILY_OUTPUT
-    quarterly = build_quarterly_panel(raw, cik_to_ticker)
+    accepted_dates = load_fmp_accepted_dates(resolve_fmp_harvest_dir(data_dir, fmp_harvest_dir))
+    quarterly = build_quarterly_panel(raw, cik_to_ticker, accepted_dates=accepted_dates)
     daily_index = resolve_serving_daily_index(
         data_dir=data_dir, universe=universe, alpha_path=alpha_path
     )
@@ -552,6 +731,7 @@ def build_daily_fundamentals(
     features = compute_derived_features(daily_raw, data_dir / "ohlcv")
     if features.empty:
         raise RuntimeError("SEC daily fundamentals produced no feature rows")
+    validate_pit_provenance(features)
     out.parent.mkdir(parents=True, exist_ok=True)
     features.to_parquet(out, index=False)
     return out
@@ -566,10 +746,12 @@ def build_extended_fundamentals(
     alpha_path: str | Path | None = None,
     output_path: str | Path | None = None,
     train_end: str | pd.Timestamp = "2022-11-01",
+    fmp_harvest_dir: str | Path | None = None,
 ) -> Path:
     data_dir = Path(data_dir).expanduser().resolve()
     out = Path(output_path).expanduser().resolve() if output_path else data_dir / DEFAULT_EXTENDED_OUTPUT
-    quarterly = build_quarterly_panel(raw, cik_to_ticker)
+    accepted_dates = load_fmp_accepted_dates(resolve_fmp_harvest_dir(data_dir, fmp_harvest_dir))
+    quarterly = build_quarterly_panel(raw, cik_to_ticker, accepted_dates=accepted_dates)
     quarterly_ext = compute_extended_quarterly_features(quarterly)
     daily_index = resolve_serving_daily_index(
         data_dir=data_dir, universe=universe, alpha_path=alpha_path
@@ -578,6 +760,7 @@ def build_extended_fundamentals(
     if daily_ext.empty:
         raise RuntimeError("SEC extended fundamentals produced no feature rows")
     daily_ext = robust_zscore_train_window(daily_ext, cols=EXTENDED_FEATURE_COLS, train_end=train_end)
+    validate_pit_provenance(daily_ext)
     out.parent.mkdir(parents=True, exist_ok=True)
     daily_ext.to_parquet(out, index=False)
     return out
@@ -661,6 +844,7 @@ class BuildDailyFundamentalsTask(Task):
             data_dir=ctx.config.data_dir,
             alpha_path=ctx.config.alpha_path,
             output_path=ctx.config.daily_output,
+            fmp_harvest_dir=ctx.config.fmp_harvest_dir,
         )
         ctx.summary["daily_output"] = str(output)
         return True
@@ -708,6 +892,7 @@ class BuildExtendedFundamentalsTask(Task):
             alpha_path=ctx.config.alpha_path,
             output_path=ctx.config.extended_output,
             train_end=ctx.config.train_end,
+            fmp_harvest_dir=ctx.config.fmp_harvest_dir,
         )
         ctx.summary["extended_output"] = str(output)
         return True
@@ -770,6 +955,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--alpha-path", type=Path, default=None)
     parser.add_argument("--daily-output", type=Path, default=None)
     parser.add_argument("--extended-output", type=Path, default=None)
+    parser.add_argument(
+        "--fmp-harvest-dir", type=Path, default=None,
+        help="FMP fundamentals harvest dir whose income-statement acceptedDate "
+             f"backfills available_at (default: <data-dir>/{DEFAULT_FMP_HARVEST_DIRNAME})",
+    )
     parser.add_argument("--start-year", type=int, default=DEFAULT_START_YEAR)
     parser.add_argument("--end-year", type=int, default=2026)
     parser.add_argument("--sleep-sec", type=float, default=0.12)
@@ -796,6 +986,7 @@ def main(argv: list[str] | None = None) -> int:
         alpha_path=args.alpha_path,
         daily_output=args.daily_output,
         extended_output=args.extended_output,
+        fmp_harvest_dir=args.fmp_harvest_dir,
         dry_run=args.dry_run,
         sleep_sec=args.sleep_sec,
         per_request_sec=args.per_request_sec,
