@@ -399,6 +399,41 @@ class TestHarvest:
         assert all(r["ticker"] == "AAPL" for r in records)
 
     @patch("renquant_base_data.sec_edgar_companyfacts_harvester.time.sleep")
+    def test_harvest_rerun_after_partial_crash_does_not_duplicate_facts(
+        self, mock_sleep, tmp_path
+    ):
+        """A crash that leaves AAPL's fact lines on disk WITHOUT its marker
+        (simulated pre-existing state) must not cause a rerun to duplicate
+        those facts on top of the surviving partial write — the final file
+        must contain each fact record for the ticker exactly once."""
+        session = self._mock_session()
+        cik_map = {"AAPL": 320193}
+        output = tmp_path / "out.jsonl"
+        partial_records = extract_facts("AAPL", SAMPLE_COMPANY_FACTS)
+        output.write_text(
+            "".join(
+                json.dumps(r, sort_keys=True) + "\n" for r in partial_records
+            )
+        )  # facts persisted, no marker: simulates interrupted write
+
+        harvest(["AAPL"], output, session=session, ticker_cik_map=cik_map)
+
+        lines = output.read_text().strip().splitlines()
+        recs = [json.loads(line) for line in lines]
+        fact_recs = [r for r in recs if "filed_date" in r]
+        marker_recs = [r for r in recs if r.get("_harvest_complete")]
+
+        # Exactly one marker for AAPL, and no fact record appears more than
+        # once (dedup key: field + period_end + accession_number).
+        assert len(marker_recs) == 1
+        seen = set()
+        for r in fact_recs:
+            key = (r["field"], r["period_end"], r["accession_number"])
+            assert key not in seen, f"duplicate fact record: {key}"
+            seen.add(key)
+        assert len(fact_recs) == len(partial_records)
+
+    @patch("renquant_base_data.sec_edgar_companyfacts_harvester.time.sleep")
     def test_harvest_missing_cik(self, mock_sleep):
         session = self._mock_session()
         cik_map = {}

@@ -26,6 +26,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -195,6 +197,63 @@ def load_completed_tickers(output_path: Path) -> set[str]:
     return seen
 
 
+def _replace_ticker_batch(output: Path, ticker: str, batch: str) -> None:
+    """Atomically replace *ticker*'s lines in *output* with *batch*.
+
+    Two hazards, both closed here:
+
+    1. **Crash mid-write.** A plain ``open(output, "a").write(...)`` is not
+       crash-safe — a hard kill or power loss mid-syscall can leave a
+       partial batch on disk (some fact lines persisted, the trailing
+       completion-marker line truncated or missing).
+    2. **Stale partial-write duplication.** Because a ticker with no marker
+       is (correctly) re-harvested on the next run, any fact lines already
+       on disk for that ticker are leftovers from an interrupted, never-
+       completed attempt — not data to preserve. Naively *appending* the
+       fresh batch on top of them (even if that append itself were atomic)
+       would duplicate every fact the interrupted run had already written.
+
+    This function reads the existing file, drops every line belonging to
+    *ticker* (stale partial data, since we are here specifically because
+    that ticker had no completion marker), appends the freshly-harvested
+    *batch*, and commits the result via write-temp + fsync + ``os.replace``
+    (an atomic rename on POSIX) — so *output* is always either its previous
+    complete state or the new state, never a mix, and never contains more
+    than one copy of any fact record for a given rerun. Output files here
+    are one harvest run's worth of a bounded watchlist (at most low
+    hundreds of tickers), so rewriting the whole file per ticker is cheap.
+    """
+    kept_lines: list[str] = []
+    if output.exists():
+        for line in output.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("ticker") == ticker:
+                continue  # stale partial data for the ticker being redone
+            kept_lines.append(line)
+
+    new_content = "".join(l + "\n" for l in kept_lines) + batch
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(output.parent), prefix=f".{output.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(new_content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, output)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def harvest(
     tickers: list[str],
     output: Path | None = None,
@@ -207,11 +266,12 @@ def harvest(
     Returns all extracted records. If *output* is given, appends JSONL there
     (resumable: skips tickers whose completion marker is already present).
 
-    Each ticker's records are written and flushed as a single atomic batch,
-    immediately followed by its own completion-marker record — so a
-    kill/crash between two tickers, or mid-write of one ticker's records
-    (before the marker line lands), never leaves a ticker looking "done"
-    when it is not.
+    Each ticker's records plus its completion-marker record are committed to
+    *output* via an atomic whole-file replace that also drops any stale,
+    marker-less lines already on disk for that ticker (see
+    :func:`_replace_ticker_batch`) — so a kill/crash while writing one
+    ticker's batch, or a rerun after one, can never leave duplicate fact
+    rows for that ticker on disk.
     """
     if session is None:
         session = _session()
@@ -223,45 +283,39 @@ def harvest(
 
     skip = load_completed_tickers(output) if output else set()
     all_records: list[dict[str, Any]] = []
-    out_fh = open(output, "a") if output else None
 
-    try:
-        for i, ticker in enumerate(tickers):
-            ticker = ticker.upper().strip()
-            if ticker in skip:
-                log.info("[%d/%d] %s: skipped (already harvested)", i + 1, len(tickers), ticker)
-                continue
+    for i, ticker in enumerate(tickers):
+        ticker = ticker.upper().strip()
+        if ticker in skip:
+            log.info("[%d/%d] %s: skipped (already harvested)", i + 1, len(tickers), ticker)
+            continue
 
-            cik = ticker_cik_map.get(ticker)
-            if cik is None:
-                log.warning("[%d/%d] %s: no CIK found", i + 1, len(tickers), ticker)
-                continue
+        cik = ticker_cik_map.get(ticker)
+        if cik is None:
+            log.warning("[%d/%d] %s: no CIK found", i + 1, len(tickers), ticker)
+            continue
 
-            facts = fetch_company_facts(session, cik)
-            if facts is None:
-                continue
+        facts = fetch_company_facts(session, cik)
+        if facts is None:
+            continue
 
-            records = extract_facts(ticker, facts)
-            all_records.extend(records)
-            log.info(
-                "[%d/%d] %s (CIK %d): %d records",
-                i + 1, len(tickers), ticker, cik, len(records),
+        records = extract_facts(ticker, facts)
+        all_records.extend(records)
+        log.info(
+            "[%d/%d] %s (CIK %d): %d records",
+            i + 1, len(tickers), ticker, cik, len(records),
+        )
+
+        if output:
+            batch = "".join(
+                json.dumps(rec, sort_keys=True) + "\n" for rec in records
             )
-
-            if out_fh:
-                batch = "".join(
-                    json.dumps(rec, sort_keys=True) + "\n" for rec in records
-                )
-                batch += json.dumps(
-                    {"ticker": ticker, _HARVEST_COMPLETE_MARKER: True,
-                     "record_count": len(records)},
-                    sort_keys=True,
-                ) + "\n"
-                out_fh.write(batch)
-                out_fh.flush()
-    finally:
-        if out_fh:
-            out_fh.close()
+            batch += json.dumps(
+                {"ticker": ticker, _HARVEST_COMPLETE_MARKER: True,
+                 "record_count": len(records)},
+                sort_keys=True,
+            ) + "\n"
+            _replace_ticker_batch(output, ticker, batch)
 
     return all_records
 

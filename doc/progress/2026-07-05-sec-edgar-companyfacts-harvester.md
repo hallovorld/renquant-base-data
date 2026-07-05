@@ -55,13 +55,48 @@ for a per-ticker PIT harvest.
    reproduces the crash scenario and confirms the fixed code re-harvests
    rather than skips.
 
+## Round 2 (Codex review — crash-recovery duplication bug)
+
+The marker-based resumability fix (above) correctly decides *whether* to
+re-harvest a ticker after a crash, but the write path itself had a second,
+separate bug: `harvest()` opened `output` in plain append mode
+(`open(output, "a")`) and wrote each ticker's batch there directly. Two
+hazards followed from that:
+
+1. **Crash mid-write** — a hard kill/power loss during that `write()` call
+   is not guaranteed atomic; it can leave a partial batch on disk (fact
+   lines persisted, the trailing marker line truncated or missing).
+2. **Stale-data duplication** — since a ticker with no marker is (correctly)
+   re-harvested on the next run, any fact lines already on disk for that
+   ticker are leftovers from an interrupted, never-completed attempt. The
+   old append-only write path had no way to remove them, so the freshly
+   re-harvested batch landed *on top of* the stale partial lines instead of
+   replacing them — duplicating every fact the interrupted run had already
+   written.
+
+Fixed via `_replace_ticker_batch()`: before committing a ticker's fresh
+batch, it reads `output`, drops every existing line belonging to that
+ticker (the stale partial data), appends the new batch, and commits the
+result via write-temp + `fsync` + `os.replace` (atomic rename on POSIX) —
+so `output` is always either its previous complete state or the new state,
+never a mix, and a given fact record can never appear twice after a rerun.
+Output files here are one harvest run's worth of a bounded watchlist (low
+hundreds of tickers at most), so rewriting the whole file per ticker is
+cheap.
+
+Verified genuinely: reverted the source fix (keeping only the new test),
+confirmed `test_harvest_rerun_after_partial_crash_does_not_duplicate_facts`
+fails against the original code (asserts a duplicate `revenue` record),
+then reapplied the fix and confirmed it passes.
+
 ## Tests
 
-30 tests in `tests/test_sec_edgar_companyfacts_harvester.py` — CIK mapping,
+31 tests in `tests/test_sec_edgar_companyfacts_harvester.py` — CIK mapping,
 fact extraction, the ASC-606 canonical-field-normalization fix (2 dedicated
 tests), the marker-based resumability fix (5 dedicated tests including the
-partial-crash-rerun scenario), harvest integration (mocked HTTP), output
-format. Full base-data suite: 293 passed, 1 skipped, no regressions.
+partial-crash-rerun scenario), the crash-recovery duplication fix (1
+dedicated test), harvest integration (mocked HTTP), output format. Full
+base-data suite: 294 passed, 1 skipped, no regressions.
 
 ## Orchestrator side
 
