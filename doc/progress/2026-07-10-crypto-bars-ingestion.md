@@ -159,3 +159,51 @@ parquet-dependent tests via importorskip. Full suite: 338 passed, 1
 pre-existing environment-only failure (`test_fetchers_lift` compares against
 a sibling `../RenQuant` checkout; passes in the primary checkout, unrelated
 to this change).
+
+## Codex review round 2 (2026-07-10) — content-binding + duplicate-hour gaps
+
+Codex confirmed round 1's universe-completeness, cutoff-window, and
+24-distinct-hour fixes, and found two further provenance defects (the raw
+review text had some function/variable names dropped by what looks like a
+markdown code-span stripping glitch on Codex's end; both points below were
+reconstructed by reading the actual code directly, not guessed from the
+degraded text):
+
+1. **Manifest content-binding**: `manifest_eligible_for_session` verified
+   the manifest's OWN fingerprint (`verify_crypto_manifest` — internal
+   self-consistency) but never checked that the `df` a caller hands in
+   alongside the manifest is the data the manifest actually sealed. An
+   intact, untampered, complete-universe manifest could therefore be paired
+   with modified rows, or even another symbol's frame, and the function
+   would still wave it through. Fixed: `manifest_eligible_for_session` now
+   takes a required `symbol` argument whenever `df` is given, recomputes
+   `_content_sha256(df)`, and requires it to equal
+   `manifest["symbols"][symbol]["content_sha256"]` exactly — fails closed
+   (`ManifestNotSignalEligibleError`) on a content mismatch, an unsealed
+   symbol, or (via a plain `ValueError`) a missing `symbol` argument when
+   `df` is supplied. Four new tests: happy path re-verified with a real
+   content hash, tampered-row rejection, wrong-symbol rejection, unsealed-
+   symbol rejection.
+2. **Duplicate-hour double-counting**: `resample_hourly_to_utc_daily`'s
+   round-1 fix (hour-of-day SET equals all 24 slots) correctly catches a
+   missing hour, but not a 25-row day where one hour appears twice and the
+   SET of hours still covers all 24 — that duplicate would silently double-
+   count its hour's volume in the aggregation, inflating an otherwise
+   apparently-valid day's reported volume. Fixed: completeness now requires
+   BOTH the hour-set-equals-24 check AND an exact `len(group) == 24` row
+   count; either condition alone is insufficient (a set-only check misses
+   the duplicate-inflated case; a count-only check misses a genuinely
+   missing hour padded by an unrelated duplicate). New regression test: 25
+   rows, all 24 distinct hours present via a duplicated hour — day is
+   dropped, not emitted with inflated volume.
+
+Verified meaningful: reverted only the source fix (kept the new tests) and
+confirmed all 6 new/changed tests fail without it — 3 with `TypeError:
+unexpected keyword argument 'symbol'` (proving the parameter genuinely
+didn't exist before), 3 with assertion/logic failures (proving the
+duplicate-hour and content-mismatch bugs are real, not hypothetical).
+
+Tests: `tests/test_crypto_bars.py` 59 → 64 (5 new). Full repo suite: 358
+passed, 1 skipped, zero regressions. PR remains DRAFT (point 1 from round 1
+— the D-C1 `renquant-common` dependency — is unresolved and out of scope
+for this round).

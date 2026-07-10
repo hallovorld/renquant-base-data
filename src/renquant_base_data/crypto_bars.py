@@ -256,6 +256,7 @@ def manifest_eligible_for_session(
     manifest: dict,
     session_date: "date | str | pd.Timestamp",
     df: "pd.DataFrame | None" = None,
+    symbol: "str | None" = None,
 ) -> "pd.DataFrame | None":
     """RFC §3.5 manifest-BOUND eligibility (Codex review: bar-close
     timestamps alone are not a leakage proof).
@@ -286,6 +287,18 @@ def manifest_eligible_for_session(
        at noon labelled eligible because its bar closed at D 00:00"
        scenario Codex flagged — rejected regardless of bar timestamps,
        fingerprint validity, or universe completeness.
+    6. **Content binding (Codex review, r2)** — checks 1-5 only prove the
+       MANIFEST is internally consistent; they say nothing about whether
+       the ``df`` a caller hands in alongside it is the data the manifest
+       actually sealed. An intact, untampered manifest could otherwise be
+       paired with modified rows, or even another symbol's frame, and this
+       function would wave it through. When ``df`` is given, the caller
+       MUST also declare ``symbol`` (which manifest-sealed pair ``df``
+       claims to be); this function then recomputes
+       :func:`_content_sha256` over ``df`` and requires it to equal
+       ``manifest["symbols"][symbol]["content_sha256"]`` exactly — a
+       tampered-row or wrong-symbol ``df`` fails closed here, regardless of
+       how it scores on checks 1-5.
 
     If ``df`` is given, returns the bars eligible for session D (delegates
     to :func:`bars_eligible_for_session`) — but only once every check above
@@ -334,6 +347,28 @@ def manifest_eligible_for_session(
             "timestamps (RFC §3.5)"
         )
     if df is not None:
+        if not symbol:
+            raise ValueError(
+                "manifest_eligible_for_session(df=...) requires symbol= too — "
+                "the caller must declare which manifest-sealed pair df claims "
+                "to be, or content-binding cannot be checked at all"
+            )
+        symbol_entry = manifest.get("symbols", {}).get(symbol)
+        if symbol_entry is None or symbol_entry.get("status") != "ok":
+            raise ManifestNotSignalEligibleError(
+                f"manifest has no sealed 'ok' entry for symbol {symbol!r}: "
+                f"{manifest.get('dataset_id')!r}"
+            )
+        sealed_hash = symbol_entry.get("content_sha256")
+        actual_hash = _content_sha256(df)
+        if not sealed_hash or actual_hash != sealed_hash:
+            raise ManifestNotSignalEligibleError(
+                f"df content for {symbol!r} does not match the manifest's "
+                f"sealed content_sha256 (sealed={sealed_hash!r}, "
+                f"actual={actual_hash!r}) — this is either a tampered/modified "
+                f"frame or the wrong symbol's data, and cannot back this "
+                f"session's signal regardless of its timestamps"
+            )
         return bars_eligible_for_session(df, session_date)
     return None
 
@@ -533,18 +568,24 @@ def resample_hourly_to_utc_daily(
     fetched_through_utc``) are candidates — the current partial UTC day is
     never written to the daily store.
 
-    **Completeness (Codex review)**: a day is emitted ONLY if it aggregates
-    ALL 24 distinct UTC hourly slots (``00:00``..``23:00``) — not merely
-    "at least 24 rows" (duplicate rows could mask a real gap) and not "the
-    fetch window has elapsed" alone. A daily candle is a scoring input;
-    fewer than 24 source hours (a provider outage, a thin/late-listed pair,
-    a gap in the middle of the day) is incomplete market data, not a valid
-    sealed day, regardless of the ``fetched_through`` cutoff. Incomplete
-    days are silently dropped from the output (never emitted with a
-    misleadingly-low ``n_source_bars`` stamp as their only signal) — the
-    caller sees them disappear the same way a ``no_data``/``no_sealed_bars``
-    pair does elsewhere in this module's ``ingest_crypto_bars`` status
-    reporting.
+    **Completeness (Codex review, r1+r2)**: a day is emitted ONLY if it has
+    BOTH (a) exactly 24 rows AND (b) its hour-of-day set equals all 24
+    distinct UTC slots (``00:00``..``23:00``). Neither condition alone is
+    sufficient: the row-count check alone misses a real gap padded by a
+    duplicate row for some other hour, and the set-equality check alone
+    (r1's fix) misses a duplicate hour that inflates the row count to 25
+    while the SET of hours still covers all 24 — that duplicate would
+    silently double-count its hour's volume in the aggregation above,
+    reporting inflated volume for an otherwise-real day (Codex r2). "The
+    fetch window has elapsed" is not a third substitute either. A daily
+    candle is a scoring input; anything short of exactly-24-contiguous-
+    hours is incomplete or duplicated market data, not a valid sealed day,
+    regardless of the ``fetched_through`` cutoff. Incomplete/duplicated days
+    are silently dropped from the output (never emitted with a misleadingly
+    -low ``n_source_bars`` stamp, and never emitted with inflated volume
+    from a masked duplicate) — the caller sees them disappear the same way
+    a ``no_data``/``no_sealed_bars`` pair does elsewhere in this module's
+    ``ingest_crypto_bars`` status reporting.
     """
     fetched_through = _to_utc(fetched_through_utc)
     required = ["open", "high", "low", "close", "volume"]
@@ -576,7 +617,17 @@ def resample_hourly_to_utc_daily(
 
     full_utc_day_hours = frozenset(range(24))
     hour_sets = grouped.apply(lambda g: frozenset(g.index.hour))
-    complete_days = hour_sets.index[hour_sets == full_utc_day_hours]
+    row_counts = grouped.size()
+    # Both conditions required (Codex r2): the hour-SET check alone cannot
+    # tell a genuinely-complete day from one where a duplicate row for hour
+    # H masks a real gap at hour K (24 rows, but hour K is missing and H is
+    # doubled) UNLESS combined with an exact row-count check — and the
+    # row-count check alone cannot tell "24 distinct hours" from "24 rows
+    # that happen to skip an hour and double another". Together they leave
+    # no gap: exactly 24 rows AND all 24 distinct hours present.
+    complete_days = hour_sets.index[
+        (hour_sets == full_utc_day_hours) & (row_counts == 24)
+    ]
     return out.loc[out.index.isin(complete_days)]
 
 

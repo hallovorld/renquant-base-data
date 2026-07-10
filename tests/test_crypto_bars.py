@@ -21,6 +21,7 @@ from renquant_base_data.crypto_bars import (
     CryptoLocalStore,
     ManifestNotSignalEligibleError,
     VendorDailyNotUtcAlignedError,
+    _content_sha256,
     bars_eligible_for_session,
     build_crypto_features_for_pair,
     crosscheck_daily_close,
@@ -283,6 +284,24 @@ def test_resample_hourly_exactly_24_contiguous_hours_succeeds() -> None:
     assert list(out.index) == [pd.Timestamp("2026-07-07", tz="UTC")]
 
 
+def test_resample_hourly_drops_a_25_row_day_with_a_duplicated_hour(
+) -> None:
+    # Codex review round 2: all 24 distinct hours ARE present (the hour-SET
+    # check alone would pass this), but hour 5 additionally appears TWICE,
+    # so the row count is 25. A set-only completeness check would silently
+    # emit this day with hour 5's volume double-counted. Both the row-count
+    # check AND the hour-set check must be required together.
+    hours = list(pd.date_range("2026-07-07T00:00Z", "2026-07-07T23:00Z", freq="1h"))
+    hours.append(pd.Timestamp("2026-07-07T05:00Z"))  # duplicate of an existing hour
+    df = _hourly_frame(pd.DatetimeIndex(sorted(hours)))
+    assert len(df) == 25
+    assert frozenset(df.index.hour) == frozenset(range(24))  # set check alone would pass
+    out = resample_hourly_to_utc_daily(
+        df, fetched_through_utc=pd.Timestamp("2026-07-08T00:00:00Z")
+    )
+    assert list(out.index) == []  # duplicate-inflated day must still be dropped
+
+
 # ---------------------------------------------------------------------------
 # Store freshness on the UTC-day clock (B3)
 # ---------------------------------------------------------------------------
@@ -536,12 +555,24 @@ def test_manifest_fingerprint_helper_round_trip() -> None:
 # ---------------------------------------------------------------------------
 
 def _sealed_manifest_for(
-    session_date: date, *, generated_at: "pd.Timestamp | None" = None
+    session_date: date,
+    *,
+    generated_at: "pd.Timestamp | None" = None,
+    sealed_df: "pd.DataFrame | None" = None,
+    symbol: str = "BTC/USD",
 ) -> dict:
     """A minimal, correctly-fingerprinted, complete, on-time manifest for
-    the given session date — the happy path other tests mutate away from."""
+    the given session date — the happy path other tests mutate away from.
+
+    ``sealed_df``, if given, has its real content_sha256 computed and stored
+    under ``symbol`` (Codex review round 2: content-binding tests need a
+    manifest whose sealed hash genuinely matches a real frame, not a
+    placeholder string)."""
     watermark = session_watermark_utc(session_date)
     generated = generated_at if generated_at is not None else watermark + pd.Timedelta(minutes=5)
+    symbol_entry: dict = {"status": "ok"}
+    if sealed_df is not None:
+        symbol_entry["content_sha256"] = _content_sha256(sealed_df)
     payload = {
         "dataset_id": "crypto-ohlcv-1d",
         "schema_version": "crypto-ohlcv-manifest-v1",
@@ -551,12 +582,12 @@ def _sealed_manifest_for(
         "uri": "store://crypto_ohlcv/1d",
         "generated_at_utc": generated.isoformat(),
         "fetched_through_utc": generated.isoformat(),
-        "expected_universe": ["BTC/USD"],
+        "expected_universe": [symbol],
         "expected_universe_hash": "sha256:x",
         "universe_complete": True,
         "watermark_utc": watermark.isoformat(),
         "signal_eligible": True,
-        "symbols": {"BTC/USD": {"status": "ok"}},
+        "symbols": {symbol: symbol_entry},
     }
     payload["fingerprint"] = manifest_fingerprint(payload)
     return payload
@@ -566,8 +597,53 @@ def test_manifest_eligible_for_session_happy_path() -> None:
     m = _sealed_manifest_for(date(2026, 7, 10))
     assert manifest_eligible_for_session(m, date(2026, 7, 10)) is None
     df = _daily_frame(["2026-07-09"])
-    out = manifest_eligible_for_session(m, date(2026, 7, 10), df)
+    m_bound = _sealed_manifest_for(date(2026, 7, 10), sealed_df=df)
+    out = manifest_eligible_for_session(m_bound, date(2026, 7, 10), df, symbol="BTC/USD")
     assert list(out.index) == list(df.index)
+
+
+def test_manifest_eligible_for_session_requires_symbol_when_df_given() -> None:
+    # Codex review round 2: without a declared symbol, content-binding
+    # cannot be checked at all -- this must fail loud, not silently skip
+    # the check.
+    m = _sealed_manifest_for(date(2026, 7, 10))
+    df = _daily_frame(["2026-07-09"])
+    with pytest.raises(ValueError, match="symbol"):
+        manifest_eligible_for_session(m, date(2026, 7, 10), df)
+
+
+def test_manifest_eligible_for_session_rejects_tampered_rows() -> None:
+    # Codex review round 2: an intact, correctly-fingerprinted, complete-
+    # universe manifest -- but the df handed alongside it has been modified
+    # after sealing (e.g. a mutated close price). Content-binding must
+    # catch this even though every manifest-level check (1-5) passes.
+    sealed_df = _daily_frame(["2026-07-09"])
+    m = _sealed_manifest_for(date(2026, 7, 10), sealed_df=sealed_df)
+    tampered_df = sealed_df.copy()
+    tampered_df.loc[tampered_df.index[0], "close"] *= 1.01
+    with pytest.raises(ManifestNotSignalEligibleError, match="does not match"):
+        manifest_eligible_for_session(m, date(2026, 7, 10), tampered_df, symbol="BTC/USD")
+
+
+def test_manifest_eligible_for_session_rejects_wrong_symbol_df() -> None:
+    # Codex review round 2: manifest sealed for BTC/USD, but the df handed
+    # in is actually ETH/USD's data (or any other symbol not covered by
+    # this manifest's sealed entry) -- must be rejected even if internally
+    # well-formed and even if it happens to have the right timestamps.
+    btc_df = _daily_frame(["2026-07-09"])
+    eth_df = _daily_frame(["2026-07-09"], close_offset_days=1)
+    eth_df["close"] = eth_df["close"] * 7.3  # a different price series entirely
+    m = _sealed_manifest_for(date(2026, 7, 10), sealed_df=btc_df)
+    with pytest.raises(ManifestNotSignalEligibleError, match="does not match"):
+        manifest_eligible_for_session(m, date(2026, 7, 10), eth_df, symbol="BTC/USD")
+
+
+def test_manifest_eligible_for_session_rejects_unsealed_symbol() -> None:
+    # symbol= names a pair the manifest never sealed at all.
+    m = _sealed_manifest_for(date(2026, 7, 10))
+    df = _daily_frame(["2026-07-09"])
+    with pytest.raises(ManifestNotSignalEligibleError, match="no sealed"):
+        manifest_eligible_for_session(m, date(2026, 7, 10), df, symbol="ETH/USD")
 
 
 def test_manifest_eligible_for_session_rejects_tampered_fingerprint() -> None:
