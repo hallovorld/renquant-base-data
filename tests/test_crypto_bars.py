@@ -19,6 +19,7 @@ import pytest
 from renquant_base_data.crypto_bars import (
     BAR_CLOSE_COL,
     CryptoLocalStore,
+    ManifestNotSignalEligibleError,
     VendorDailyNotUtcAlignedError,
     bars_eligible_for_session,
     build_crypto_features_for_pair,
@@ -28,6 +29,7 @@ from renquant_base_data.crypto_bars import (
     ingest_crypto_bars,
     last_completed_utc_session,
     load_crypto_ingestion_manifest,
+    manifest_eligible_for_session,
     manifest_fingerprint,
     normalize_daily_bars_utc,
     pair_slug,
@@ -229,6 +231,58 @@ def test_resample_hourly_to_utc_daily_aggregation_and_sealing() -> None:
     assert d1[BAR_CLOSE_COL] == pd.Timestamp("2026-07-08", tz="UTC")
 
 
+def _hourly_frame(hours: pd.DatetimeIndex) -> pd.DataFrame:
+    n = len(hours)
+    return pd.DataFrame(
+        {
+            "open": [1.0] * n,
+            "high": [1.5] * n,
+            "low": [0.5] * n,
+            "close": [1.2] * n,
+            "volume": [1.0] * n,
+        },
+        index=pd.DatetimeIndex(hours, name="timestamp"),
+    )
+
+
+def test_resample_hourly_drops_a_day_with_fewer_than_24_hours() -> None:
+    # 07-07 has all 24 hours; 07-08 is missing hour 12 (23 hours) — both
+    # days are within the fetched-through window, but 07-08 must still be
+    # dropped: a <24-hour day is incomplete market data, not a valid sealed
+    # day, regardless of the fetch cutoff (Codex review round 1 on #41).
+    hours = pd.date_range("2026-07-07T00:00Z", "2026-07-08T23:00Z", freq="1h")
+    hours = hours[hours != pd.Timestamp("2026-07-08T12:00Z")]
+    df = _hourly_frame(hours)
+    out = resample_hourly_to_utc_daily(
+        df, fetched_through_utc=pd.Timestamp("2026-07-09T00:00:00Z")
+    )
+    assert list(out.index) == [pd.Timestamp("2026-07-07", tz="UTC")]
+
+
+def test_resample_hourly_drops_a_day_with_a_mid_day_gap_even_at_24_rows() -> None:
+    # 24 rows present, but hour 5 is duplicated and hour 17 is missing — the
+    # naive "count == 24" check would pass this; the hour-SET check must not.
+    hours = list(pd.date_range("2026-07-07T00:00Z", "2026-07-07T23:00Z", freq="1h"))
+    hours.remove(pd.Timestamp("2026-07-07T17:00Z"))
+    hours.append(pd.Timestamp("2026-07-07T05:00Z"))  # duplicate of an existing hour
+    df = _hourly_frame(pd.DatetimeIndex(sorted(hours)))
+    assert len(df) == 24  # same row count as a genuinely complete day
+    out = resample_hourly_to_utc_daily(
+        df, fetched_through_utc=pd.Timestamp("2026-07-08T00:00:00Z")
+    )
+    assert list(out.index) == []  # gap must still be caught
+
+
+def test_resample_hourly_exactly_24_contiguous_hours_succeeds() -> None:
+    hours = pd.date_range("2026-07-07T00:00Z", "2026-07-07T23:00Z", freq="1h")
+    assert len(hours) == 24
+    df = _hourly_frame(hours)
+    out = resample_hourly_to_utc_daily(
+        df, fetched_through_utc=pd.Timestamp("2026-07-08T00:00:00Z")
+    )
+    assert list(out.index) == [pd.Timestamp("2026-07-07", tz="UTC")]
+
+
 # ---------------------------------------------------------------------------
 # Store freshness on the UTC-day clock (B3)
 # ---------------------------------------------------------------------------
@@ -312,6 +366,47 @@ def test_ingest_daily_writes_slug_store_and_watermark_manifest(tmp_path: Path) -
 
     report = validate_data_manifest(payload)
     assert report["ok"] is True
+
+    # Universe completeness (Codex review round 1 on #41): both requested
+    # pairs sealed an 'ok' bar, so this manifest IS signal-eligible.
+    assert payload["expected_universe"] == ["BTC/USD", "ETH/USD"]
+    assert payload["universe_complete"] is True
+    assert payload["signal_eligible"] is True
+
+
+def test_ingest_partial_universe_fetch_is_not_signal_eligible(tmp_path: Path) -> None:
+    """Codex review round 1 on #41: a manifest must not falsely claim an
+    actionable watermark for an incomplete universe. Request two pairs, make
+    one fail entirely (no data) — the resulting manifest must record the
+    successful pair's watermark for OPS VISIBILITY only, but the manifest as
+    a whole must be marked incomplete/not-signal-eligible, and no session
+    manifest built from it may be consumed."""
+    pytest.importorskip("pyarrow")
+    store = CryptoLocalStore(tmp_path)
+
+    def fake_fetch(pairs, *, timeframe="1Day", start=None, end=None, **_kw):
+        assert timeframe == "1Day"
+        out = {}
+        if "BTC/USD" in pairs:
+            out["BTC/USD"] = _vendor_daily(["2026-07-06", "2026-07-07", "2026-07-08"])
+        # ETH/USD deliberately absent -> "no_data" status.
+        return out
+
+    payload = ingest_crypto_bars(
+        ["BTC/USD", "ETH/USD"], store=store, fetch_fn=fake_fetch, now_fn=lambda: _NOW
+    )
+    assert payload["symbols"]["BTC/USD"]["status"] == "ok"
+    assert payload["symbols"]["ETH/USD"]["status"] == "no_data"
+    assert payload["expected_universe"] == ["BTC/USD", "ETH/USD"]
+    assert payload["universe_complete"] is False
+    assert payload["signal_eligible"] is False
+    # The BTC watermark is still recorded for ops diagnostics (last BTC bar
+    # 07-08 closes 07-09 00:00Z) ...
+    assert pd.Timestamp(payload["watermark_utc"]) == pd.Timestamp("2026-07-09", tz="UTC")
+    # ... but must not be usable as a session manifest: the eligibility gate
+    # rejects it outright, regardless of the (diagnostic-only) watermark.
+    with pytest.raises(ManifestNotSignalEligibleError, match="incomplete"):
+        manifest_eligible_for_session(payload, date(2026, 7, 9))
 
 
 def test_ingest_manifest_fingerprint_tamper_evident(tmp_path: Path) -> None:
@@ -432,6 +527,99 @@ def test_manifest_fingerprint_helper_round_trip() -> None:
         json.dumps({"a": 1, "b": "x"}, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     assert payload["fingerprint"] == expected
+
+
+# ---------------------------------------------------------------------------
+# Manifest-BOUND eligibility (RFC §3.5, Codex review round 1 on #41): bar
+# timestamps alone are not a leakage proof — the manifest's own identity,
+# completeness, and generation time must all check out.
+# ---------------------------------------------------------------------------
+
+def _sealed_manifest_for(
+    session_date: date, *, generated_at: "pd.Timestamp | None" = None
+) -> dict:
+    """A minimal, correctly-fingerprinted, complete, on-time manifest for
+    the given session date — the happy path other tests mutate away from."""
+    watermark = session_watermark_utc(session_date)
+    generated = generated_at if generated_at is not None else watermark + pd.Timedelta(minutes=5)
+    payload = {
+        "dataset_id": "crypto-ohlcv-1d",
+        "schema_version": "crypto-ohlcv-manifest-v1",
+        "asset_class": "crypto",
+        "provider": "alpaca:v1beta3",
+        "timeframe": "1Day",
+        "uri": "store://crypto_ohlcv/1d",
+        "generated_at_utc": generated.isoformat(),
+        "fetched_through_utc": generated.isoformat(),
+        "expected_universe": ["BTC/USD"],
+        "expected_universe_hash": "sha256:x",
+        "universe_complete": True,
+        "watermark_utc": watermark.isoformat(),
+        "signal_eligible": True,
+        "symbols": {"BTC/USD": {"status": "ok"}},
+    }
+    payload["fingerprint"] = manifest_fingerprint(payload)
+    return payload
+
+
+def test_manifest_eligible_for_session_happy_path() -> None:
+    m = _sealed_manifest_for(date(2026, 7, 10))
+    assert manifest_eligible_for_session(m, date(2026, 7, 10)) is None
+    df = _daily_frame(["2026-07-09"])
+    out = manifest_eligible_for_session(m, date(2026, 7, 10), df)
+    assert list(out.index) == list(df.index)
+
+
+def test_manifest_eligible_for_session_rejects_tampered_fingerprint() -> None:
+    m = _sealed_manifest_for(date(2026, 7, 10))
+    # Mutate to a genuinely DIFFERENT value post-seal without recomputing the
+    # fingerprint -- exactly what "tampered" means.
+    m["watermark_utc"] = "2099-01-01T00:00:00+00:00"
+    with pytest.raises(ManifestNotSignalEligibleError, match="fingerprint"):
+        manifest_eligible_for_session(m, date(2026, 7, 10))
+
+
+def test_manifest_eligible_for_session_rejects_incomplete_universe() -> None:
+    m = _sealed_manifest_for(date(2026, 7, 10))
+    m["universe_complete"] = False
+    m["fingerprint"] = manifest_fingerprint(m)
+    with pytest.raises(ManifestNotSignalEligibleError, match="incomplete"):
+        manifest_eligible_for_session(m, date(2026, 7, 10))
+
+
+def test_manifest_eligible_for_session_rejects_watermark_mismatch() -> None:
+    # A perfectly valid manifest — but for the WRONG session.
+    m = _sealed_manifest_for(date(2026, 7, 9))
+    with pytest.raises(ManifestNotSignalEligibleError, match="does not match"):
+        manifest_eligible_for_session(m, date(2026, 7, 10))
+
+
+@pytest.mark.parametrize(
+    "generated_offset_minutes",
+    [-1, 15, 20, 60],  # before window open; at/after window close (exclusive upper bound)
+)
+def test_manifest_eligible_for_session_rejects_outside_signal_freeze_window(
+    generated_offset_minutes: int,
+) -> None:
+    session = date(2026, 7, 10)
+    watermark = session_watermark_utc(session)
+    m = _sealed_manifest_for(
+        session, generated_at=watermark + pd.Timedelta(minutes=generated_offset_minutes)
+    )
+    with pytest.raises(ManifestNotSignalEligibleError, match="cutoff window"):
+        manifest_eligible_for_session(m, session)
+
+
+@pytest.mark.parametrize("generated_offset_minutes", [0, 1, 14])
+def test_manifest_eligible_for_session_accepts_inside_signal_freeze_window(
+    generated_offset_minutes: int,
+) -> None:
+    session = date(2026, 7, 10)
+    watermark = session_watermark_utc(session)
+    m = _sealed_manifest_for(
+        session, generated_at=watermark + pd.Timedelta(minutes=generated_offset_minutes)
+    )
+    assert manifest_eligible_for_session(m, session) is None
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,67 @@
 # Crypto bars ingestion + UTC session watermarks (D-C2)
 
 **Date:** 2026-07-10
-**PR:** TBD (base-data)
-**Status:** ready for review
+**PR:** base-data#41
+**Status:** DRAFT — blocked on D-C1 (renquant-common), per Codex review round 1
 **Spec:** merged crypto RFC — orchestrator `doc/design/2026-07-10-crypto-trading-rfc.md`
 §2.3 (B1/B2/B3/B5/B6), §3.3, §3.5 (sealed data / watermark contract). Deliverable D-C2.
+
+## Codex review round 1 (2026-07-10) — data-provenance and leakage fixes
+
+Codex found the equity boundary sound but flagged four data-contract gaps.
+All four addressed:
+
+1. **D-C1 dependency (sequencing, not yet resolvable)**: `pair_slug`/
+   `slug_pair` duplicate the canonical `renquant-common` helper the RFC
+   assigns to D-C1, which doesn't exist as a merged PR yet — this creates
+   exactly the duplicated-contract class `orchestrator#454` (architecture
+   compliance audit) was merged to eliminate. **This PR stays in DRAFT**
+   until D-C1 lands. Not silently deferred: the module docstring now
+   carries an explicit, trackable TODO block naming the required follow-up
+   (delete the local implementations, import the common helper, add a
+   cross-repo parity test) as a condition for coming out of draft — not
+   optional cleanup.
+2. **Watermark completeness**: `ingest_crypto_bars` previously computed
+   `watermark_utc` over only `status=="ok"` symbols, so a partial fetch
+   (one pair failing) could silently advance a "signal-eligible-looking"
+   watermark while another requested pair was missing. Fixed: the manifest
+   now persists an immutable `expected_universe` (the full requested pair
+   list) + `expected_universe_hash`, plus a `universe_complete` boolean
+   (true only if EVERY expected pair sealed an `ok` bar) and a
+   `signal_eligible` boolean (`universe_complete AND watermark_utc is not
+   None`) that a consumer must check before trusting the manifest at all.
+   `watermark_utc` itself stays populated from the ok-subset for ops
+   diagnostics — it is explicitly documented as non-authoritative on its
+   own. New test: 2 requested pairs, 1 fails — `universe_complete=False`,
+   `signal_eligible=False`, watermark still recorded but the new
+   eligibility gate rejects it outright.
+3. **Manifest-bound eligibility**: `bars_eligible_for_session` only checked
+   bar-close timestamps on an arbitrary dataframe — a late fetch could be
+   labelled eligible purely because its bars happened to close at the right
+   boundary. New `manifest_eligible_for_session(manifest, session_date, df)`
+   is the mandatory gate: verifies fingerprint integrity, universe
+   completeness, a non-null watermark, that the manifest's watermark
+   actually matches the session's frozen watermark, AND that
+   `generated_at_utc` falls inside the RFC §3.5 frozen Class-A signal
+   cutoff window `[D 00:00, D 00:15)` UTC — rejecting (fail closed, raises
+   `ManifestNotSignalEligibleError`) any manifest generated outside that
+   window, any fingerprint mismatch, any incomplete universe, or any
+   watermark that doesn't match the requested session. 7 new tests cover
+   the happy path and every rejection mode (tamper, incomplete, watermark
+   mismatch, before/at/inside/after the cutoff window).
+4. **Hourly-fallback completeness**: `resample_hourly_to_utc_daily` used to
+   emit a resampled daily candle from however many hourly bars existed,
+   merely stamping `n_source_bars` as metadata — a day with 10 of 24 hours
+   (provider outage, thin/late-listed pair) silently became a "valid" daily
+   bar. Fixed: a day is now emitted ONLY if it has all 24 DISTINCT UTC
+   hourly slots (`00:00`..`23:00`) present — checked via the actual hour-of-
+   day SET, not just the row count, so a duplicate-hour row can't mask a
+   real gap in the middle of the day. 3 new tests: 23 contiguous hours
+   (fails), 24 rows but with a duplicate masking a mid-day gap (fails), and
+   exactly 24 contiguous hours (succeeds).
+
+Tests: `tests/test_crypto_bars.py` grew from 44 to 59 (15 new). Full suite:
+353 passed, 1 skipped, zero regressions.
 
 ## What
 

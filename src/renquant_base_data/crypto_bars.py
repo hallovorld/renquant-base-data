@@ -51,6 +51,28 @@ B6, §3.3, §3.5):
 Boundaries: ingestion + feature groundwork ONLY. No labels (SPY-excess label
 stays equity-only; crypto labels are D-C4/D-C3 scope), no decision logic, no
 broker/order logic.
+
+.. admonition:: TODO(D-C1 dependency, tracked — Codex review round 1 on #41)
+
+   ``pair_slug``/``slug_pair``/``last_completed_utc_session`` below are a
+   REPO-LOCAL DUPLICATE of the canonical ``renquant-common`` primitives the
+   RFC assigns to deliverable D-C1 (``doc/design/2026-07-10-crypto-trading-
+   rfc.md`` §7: "ALWAYS_OPEN calendar mode in ``market_calendar`` +
+   ``pair_slug`` symbol helper"). D-C1 does not exist yet as a merged PR in
+   any repo. This PR stays in DRAFT until it does, per Codex's explicit
+   instruction — merging a "repoint later" duplicate would recreate exactly
+   the duplicated-contract class the architecture-compliance audit
+   (orchestrator#454) was merged to eliminate.
+
+   **Required follow-up once D-C1 lands** (not optional cleanup):
+   1. Delete the local ``pair_slug``/``slug_pair``/``last_completed_utc_
+      session`` implementations here; import the ``renquant-common``
+      versions instead.
+   2. Add a cross-repo parity test asserting the two are behaviorally
+      identical (or, once deleted, that this module's own tests still pass
+      unchanged against the imported common helper — proving the semantics
+      really were frozen, not just documented as such).
+   3. Only then may this PR come out of draft.
 """
 from __future__ import annotations
 
@@ -217,6 +239,103 @@ def bars_eligible_for_session(df: pd.DataFrame, session_date) -> pd.DataFrame:
     else:
         closes = closes.dt.tz_convert("UTC")
     return df.loc[(closes <= watermark).to_numpy()]
+
+
+class ManifestNotSignalEligibleError(RuntimeError):
+    """A crypto ingestion manifest failed the RFC §3.5 signal-eligibility
+    contract and must not back any session's Class-A (entry) decisions.
+    Raised, never silently swallowed — callers must fail closed."""
+
+
+#: RFC §3.5 frozen quiet-interval width: signal computation must consume a
+#: manifest generated within [D 00:00, D 00:15) UTC, never later.
+SIGNAL_FREEZE_CUTOFF_MINUTES = 15
+
+
+def manifest_eligible_for_session(
+    manifest: dict,
+    session_date: "date | str | pd.Timestamp",
+    df: "pd.DataFrame | None" = None,
+) -> "pd.DataFrame | None":
+    """RFC §3.5 manifest-BOUND eligibility (Codex review: bar-close
+    timestamps alone are not a leakage proof).
+
+    A raw dataframe's ``bar_close_utc`` column can look eligible for session
+    D purely by chance (or by a late fetch that happens to land on the right
+    calendar boundary) even when the manifest that produced it is stale,
+    tampered, or missing part of the requested universe. This function is
+    the mandatory gate a consumer (D-C11's session scheduler, not yet
+    built) must pass THROUGH before touching bars at all — it verifies the
+    manifest identity itself, not just row timestamps, and fails closed
+    (raises :class:`ManifestNotSignalEligibleError`) on any violation:
+
+    1. **Fingerprint integrity** — :func:`verify_crypto_manifest`; a
+       tampered or corrupt manifest is never eligible.
+    2. **Universe completeness** — ``manifest["universe_complete"]``; a
+       partial fetch (any expected pair missing/failed) never backs a
+       session regardless of what DID succeed.
+    3. **Non-null watermark** — an empty or all-failed universe has
+       nothing to certify.
+    4. **Watermark match** — ``manifest["watermark_utc"]`` must equal
+       session D's frozen watermark (``session_watermark_utc(D)``); a
+       manifest certifying a different watermark is not this session's
+       manifest, however recent it is.
+    5. **Signal-freeze cutoff (RFC §3.5)** — ``generated_at_utc`` must fall
+       in the half-open window ``[D 00:00:00 UTC, D 00:15:00 UTC)``. A
+       manifest generated after the window closed is the exact "late fetch
+       at noon labelled eligible because its bar closed at D 00:00"
+       scenario Codex flagged — rejected regardless of bar timestamps,
+       fingerprint validity, or universe completeness.
+
+    If ``df`` is given, returns the bars eligible for session D (delegates
+    to :func:`bars_eligible_for_session`) — but only once every check above
+    has passed. If ``df`` is omitted, returns ``None`` (callers that only
+    need the eligibility verdict itself, e.g. to decide whether to proceed
+    at all before loading any bars).
+    """
+    if not verify_crypto_manifest(manifest):
+        raise ManifestNotSignalEligibleError(
+            f"manifest fingerprint mismatch (tampered or corrupt): "
+            f"{manifest.get('dataset_id')!r}"
+        )
+    if not manifest.get("universe_complete"):
+        raise ManifestNotSignalEligibleError(
+            "manifest universe incomplete — not every expected pair sealed "
+            f"an 'ok' bar: expected={manifest.get('expected_universe')} "
+            f"symbols={manifest.get('symbols')}"
+        )
+    watermark_raw = manifest.get("watermark_utc")
+    if watermark_raw is None:
+        raise ManifestNotSignalEligibleError(
+            f"manifest has no watermark (empty or all-failed universe): "
+            f"{manifest.get('dataset_id')!r}"
+        )
+    session_watermark = session_watermark_utc(session_date)
+    manifest_watermark = _to_utc(watermark_raw)
+    if manifest_watermark != session_watermark:
+        raise ManifestNotSignalEligibleError(
+            f"manifest watermark {manifest_watermark.isoformat()} does not match "
+            f"session {session_date}'s frozen watermark {session_watermark.isoformat()}"
+        )
+    generated_at = manifest.get("generated_at_utc")
+    if generated_at is None:
+        raise ManifestNotSignalEligibleError(
+            f"manifest lacks generated_at_utc: {manifest.get('dataset_id')!r}"
+        )
+    generated_at = _to_utc(generated_at)
+    window_start = session_watermark
+    window_end = session_watermark + pd.Timedelta(minutes=SIGNAL_FREEZE_CUTOFF_MINUTES)
+    if not (window_start <= generated_at < window_end):
+        raise ManifestNotSignalEligibleError(
+            f"manifest generated_at_utc {generated_at.isoformat()} is outside the "
+            f"frozen Class-A signal cutoff window [{window_start.isoformat()}, "
+            f"{window_end.isoformat()}) for session {session_date} — a late-generated "
+            "manifest cannot back this session's entries regardless of its bar "
+            "timestamps (RFC §3.5)"
+        )
+    if df is not None:
+        return bars_eligible_for_session(df, session_date)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -409,11 +528,23 @@ def resample_hourly_to_utc_daily(
     """Deterministically aggregate vendor 1Hour bars into UTC-calendar-day bars.
 
     open = first hourly open, high = max, low = min, close = last hourly
-    close, volume = sum, ``n_source_bars`` = hourly bar count (thin pairs can
-    miss hours; the count is stamped so downstream can judge coverage).
-    Only days whose full window has elapsed AND been fetched
-    (``day end <= fetched_through_utc``) are emitted — the current partial
-    UTC day is never written to the daily store.
+    close, volume = sum, ``n_source_bars`` = hourly bar count. Only days
+    whose full window has elapsed AND been fetched (``day end <=
+    fetched_through_utc``) are candidates — the current partial UTC day is
+    never written to the daily store.
+
+    **Completeness (Codex review)**: a day is emitted ONLY if it aggregates
+    ALL 24 distinct UTC hourly slots (``00:00``..``23:00``) — not merely
+    "at least 24 rows" (duplicate rows could mask a real gap) and not "the
+    fetch window has elapsed" alone. A daily candle is a scoring input;
+    fewer than 24 source hours (a provider outage, a thin/late-listed pair,
+    a gap in the middle of the day) is incomplete market data, not a valid
+    sealed day, regardless of the ``fetched_through`` cutoff. Incomplete
+    days are silently dropped from the output (never emitted with a
+    misleadingly-low ``n_source_bars`` stamp as their only signal) — the
+    caller sees them disappear the same way a ``no_data``/``no_sealed_bars``
+    pair does elsewhere in this module's ``ingest_crypto_bars`` status
+    reporting.
     """
     fetched_through = _to_utc(fetched_through_utc)
     required = ["open", "high", "low", "close", "volume"]
@@ -441,7 +572,12 @@ def resample_hourly_to_utc_daily(
     )
     out.index.name = "timestamp"
     out[BAR_CLOSE_COL] = out.index + pd.Timedelta(days=1)
-    return out.loc[out[BAR_CLOSE_COL] <= fetched_through]
+    out = out.loc[out[BAR_CLOSE_COL] <= fetched_through]
+
+    full_utc_day_hours = frozenset(range(24))
+    hour_sets = grouped.apply(lambda g: frozenset(g.index.hour))
+    complete_days = hour_sets.index[hour_sets == full_utc_day_hours]
+    return out.loc[out.index.isin(complete_days)]
 
 
 def _stamp_intraday_bars(
@@ -645,6 +781,27 @@ def ingest_crypto_bars(
     ]
     watermark = min(sealed_closes).isoformat() if sealed_closes else None
 
+    # Universe completeness (Codex review: a partial-universe fetch must not
+    # silently advance a signal-eligible watermark). `pairs` is the FULL
+    # requested/expected universe for this ingestion call, known up front —
+    # persist it (+ a content hash) so a manifest's completeness claim is
+    # checkable against an immutable snapshot, not re-derived from whatever
+    # happens to be in `symbols` after the fact.
+    expected_universe = sorted(pairs)
+    expected_universe_hash = "sha256:" + hashlib.sha256(
+        json.dumps(expected_universe, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    universe_complete = bool(expected_universe) and all(
+        per_symbol.get(p, {}).get("status") == "ok" for p in expected_universe
+    )
+    # signal_eligible is the single field a consumer must check before
+    # treating this manifest as fit to back a session's signal: complete
+    # universe AND a real (non-None) watermark. `watermark_utc` above stays
+    # populated from the ok-subset regardless, for ops visibility into a
+    # partial fetch -- it is diagnostic only and must NOT be read as an
+    # eligibility signal on its own (see `manifest_eligible_for_session`).
+    signal_eligible = bool(universe_complete and watermark is not None)
+
     payload: dict = {
         "dataset_id": f"crypto-ohlcv-{tf_file}",
         "schema_version": MANIFEST_SCHEMA_VERSION,
@@ -654,7 +811,11 @@ def ingest_crypto_bars(
         "uri": f"store://{CRYPTO_OHLCV_DIRNAME}/{tf_file}",
         "generated_at_utc": _to_utc(now).isoformat(),
         "fetched_through_utc": fetched_through.isoformat(),
+        "expected_universe": expected_universe,
+        "expected_universe_hash": expected_universe_hash,
+        "universe_complete": universe_complete,
         "watermark_utc": watermark,
+        "signal_eligible": signal_eligible,
         "symbols": per_symbol,
     }
     payload["fingerprint"] = manifest_fingerprint(payload)
