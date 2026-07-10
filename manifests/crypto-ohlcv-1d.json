@@ -1,0 +1,10 @@
+{
+  "dataset_id": "crypto-ohlcv-1d",
+  "schema_version": "crypto-ohlcv-manifest-v1",
+  "fingerprint": "sha256:stamped-per-ingestion-run-see-live-manifest",
+  "uri": "store://crypto_ohlcv/1d",
+  "asset_class": "crypto",
+  "retention_class": "prod",
+  "provider": "alpaca:v1beta3",
+  "note": "Registry entry for the Alpaca crypto UTC-daily bar store (crypto RFC D-C2). The authoritative, fingerprinted per-run manifest with per-symbol bar-close watermarks and content sha256 is written by renquant_base_data.crypto_bars.ingest_crypto_bars to data/crypto_ohlcv/ingestion_manifest_1d.json."
+}
