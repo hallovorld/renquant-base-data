@@ -207,3 +207,29 @@ Tests: `tests/test_crypto_bars.py` 59 → 64 (5 new). Full repo suite: 358
 passed, 1 skipped, zero regressions. PR remains DRAFT (point 1 from round 1
 — the D-C1 `renquant-common` dependency — is unresolved and out of scope
 for this round).
+
+## Round 2 follow-up (same review): store-artifact binding path
+
+Codex r2's ask was "manifest-and-**store/content-hash** bound: require the
+symbol/**store artifact** or an explicit df". The first r2 fix delivered the
+explicit-`df` half; this follow-up completes the store half so the gate can
+do the load-and-verify itself (a consumer that hand-loads a frame and then
+"forgets" the binding step is exactly the foot-gun the review names):
+
+- `manifest_eligible_for_session(..., symbol=, store=)` now loads the
+  sealed artifact `{SLUG}/{tf}.parquet` from the given `CryptoLocalStore`
+  (timeframe taken from the manifest itself), recomputes the canonical
+  content hash, and requires equality with the sealed per-symbol
+  `content_sha256`. Missing/empty artifact fails closed
+  (`ManifestNotSignalEligibleError`), as does an unknown manifest
+  timeframe. `symbol` accepts pair or slug form (normalized via the strict
+  helpers, so a malformed symbol is rejected rather than mis-looked-up).
+- 3 new tests: end-to-end ingest→store-bound consumption (including
+  post-seal parquet tamper → rejection), missing-artifact rejection,
+  store-without-symbol rejection.
+
+Tests: `tests/test_crypto_bars.py` 64 → 67. Full repo suite: 361 passed
+(the 1 `test_fetchers_lift` failure is the known worktree-environment
+sibling-path artifact; passes in the primary checkout). PR remains DRAFT on
+the D-C1 renquant-common prerequisite (canonical always-open calendar +
+`pair_slug` helper); the local stand-ins repoint when D-C1 lands.

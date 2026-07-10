@@ -698,6 +698,66 @@ def test_manifest_eligible_for_session_accepts_inside_signal_freeze_window(
     assert manifest_eligible_for_session(m, session) is None
 
 
+def test_manifest_eligible_for_session_loads_and_binds_store_artifact(
+    tmp_path: Path,
+) -> None:
+    """Codex r2: consumption may hand the gate the STORE, not a frame — the
+    gate loads the sealed artifact itself and binds it by content hash, so a
+    consumer cannot forget the binding step."""
+    pytest.importorskip("pyarrow")
+    store = CryptoLocalStore(tmp_path)
+    freeze_now = pd.Timestamp("2026-07-09T00:05:00Z")  # inside [D 00:00, D 00:15)
+    payload = ingest_crypto_bars(
+        ["BTC/USD"], store=store, fetch_fn=_fake_fetch_aligned, now_fn=lambda: freeze_now
+    )
+    assert payload["signal_eligible"] is True
+
+    # Slug form is accepted for the declared symbol (normalized to pair form).
+    out = manifest_eligible_for_session(
+        payload, date(2026, 7, 9), symbol="BTC-USD", store=store
+    )
+    assert len(out) == 3
+    closes = pd.to_datetime(out[BAR_CLOSE_COL])
+    assert closes.max() == pd.Timestamp("2026-07-09", tz="UTC")
+
+    # Tamper one stored row post-seal: the manifest is still intact
+    # (fingerprint verifies), but it must refuse to certify modified rows.
+    artifact = tmp_path / "BTC-USD" / "1d.parquet"
+    bars = pd.read_parquet(artifact)
+    bars.iloc[0, bars.columns.get_loc("close")] += 0.01
+    bars.to_parquet(artifact)
+    with pytest.raises(ManifestNotSignalEligibleError, match="does not match"):
+        manifest_eligible_for_session(
+            payload, date(2026, 7, 9), symbol="BTC/USD", store=store
+        )
+
+
+def test_manifest_eligible_for_session_store_missing_artifact_fails_closed(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("pyarrow")
+    store = CryptoLocalStore(tmp_path / "populated")
+    freeze_now = pd.Timestamp("2026-07-09T00:05:00Z")
+    payload = ingest_crypto_bars(
+        ["BTC/USD"], store=store, fetch_fn=_fake_fetch_aligned, now_fn=lambda: freeze_now
+    )
+    # An intact manifest pointed at a store that does not hold the sealed
+    # artifact must fail closed, not fall back to "manifest checks passed".
+    empty_store = CryptoLocalStore(tmp_path / "empty")
+    with pytest.raises(ManifestNotSignalEligibleError, match="missing or empty"):
+        manifest_eligible_for_session(
+            payload, date(2026, 7, 9), symbol="BTC/USD", store=empty_store
+        )
+
+
+def test_manifest_eligible_for_session_store_requires_symbol(tmp_path: Path) -> None:
+    m = _sealed_manifest_for(date(2026, 7, 10))
+    with pytest.raises(ValueError, match="symbol"):
+        manifest_eligible_for_session(
+            m, date(2026, 7, 10), store=CryptoLocalStore(tmp_path)
+        )
+
+
 # ---------------------------------------------------------------------------
 # Cache-first daily read (the provider seam's workhorse)
 # ---------------------------------------------------------------------------

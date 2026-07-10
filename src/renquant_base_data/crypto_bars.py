@@ -257,6 +257,7 @@ def manifest_eligible_for_session(
     session_date: "date | str | pd.Timestamp",
     df: "pd.DataFrame | None" = None,
     symbol: "str | None" = None,
+    store: "CryptoLocalStore | None" = None,
 ) -> "pd.DataFrame | None":
     """RFC §3.5 manifest-BOUND eligibility (Codex review: bar-close
     timestamps alone are not a leakage proof).
@@ -289,22 +290,25 @@ def manifest_eligible_for_session(
        fingerprint validity, or universe completeness.
     6. **Content binding (Codex review, r2)** — checks 1-5 only prove the
        MANIFEST is internally consistent; they say nothing about whether
-       the ``df`` a caller hands in alongside it is the data the manifest
+       the bars a caller consumes alongside it are the data the manifest
        actually sealed. An intact, untampered manifest could otherwise be
        paired with modified rows, or even another symbol's frame, and this
-       function would wave it through. When ``df`` is given, the caller
-       MUST also declare ``symbol`` (which manifest-sealed pair ``df``
-       claims to be); this function then recomputes
-       :func:`_content_sha256` over ``df`` and requires it to equal
-       ``manifest["symbols"][symbol]["content_sha256"]`` exactly — a
-       tampered-row or wrong-symbol ``df`` fails closed here, regardless of
+       function would wave it through. Bar consumption therefore requires a
+       declared ``symbol`` (which manifest-sealed pair the bars claim to
+       be; pair or slug form) plus EITHER the sealed store artifact
+       (``store=`` — this function loads ``{SLUG}/{tf}.parquet`` itself)
+       OR an explicit ``df``; either way the frame's canonical
+       :func:`_content_sha256` must equal
+       ``manifest["symbols"][pair]["content_sha256"]`` exactly — a
+       tampered-row or wrong-symbol frame fails closed here, regardless of
        how it scores on checks 1-5.
 
-    If ``df`` is given, returns the bars eligible for session D (delegates
-    to :func:`bars_eligible_for_session`) — but only once every check above
-    has passed. If ``df`` is omitted, returns ``None`` (callers that only
-    need the eligibility verdict itself, e.g. to decide whether to proceed
-    at all before loading any bars).
+    In bar-consumption mode (``symbol`` + ``df``/``store``), returns the
+    content-verified bars eligible for session D (delegates to
+    :func:`bars_eligible_for_session`) — but only once every check above
+    has passed. With neither ``df`` nor ``store``, returns ``None``
+    (callers that only need the eligibility verdict itself, e.g. to decide
+    whether to proceed at all before loading any bars).
     """
     if not verify_crypto_manifest(manifest):
         raise ManifestNotSignalEligibleError(
@@ -346,31 +350,47 @@ def manifest_eligible_for_session(
             "manifest cannot back this session's entries regardless of its bar "
             "timestamps (RFC §3.5)"
         )
-    if df is not None:
-        if not symbol:
-            raise ValueError(
-                "manifest_eligible_for_session(df=...) requires symbol= too — "
-                "the caller must declare which manifest-sealed pair df claims "
-                "to be, or content-binding cannot be checked at all"
-            )
-        symbol_entry = manifest.get("symbols", {}).get(symbol)
-        if symbol_entry is None or symbol_entry.get("status") != "ok":
+    if df is None and store is None:
+        return None
+    if not symbol:
+        raise ValueError(
+            "manifest_eligible_for_session(df=/store=) requires symbol= too — "
+            "the caller must declare which manifest-sealed pair it consumes, "
+            "or content-binding cannot be checked at all"
+        )
+    pair = _as_pair(symbol)
+    symbol_entry = manifest.get("symbols", {}).get(pair)
+    if symbol_entry is None or symbol_entry.get("status") != "ok":
+        raise ManifestNotSignalEligibleError(
+            f"manifest has no sealed 'ok' entry for symbol {pair!r}: "
+            f"{manifest.get('dataset_id')!r}"
+        )
+    if df is None:
+        tf_file = TIMEFRAME_FILES.get(manifest.get("timeframe"))
+        if tf_file is None:
             raise ManifestNotSignalEligibleError(
-                f"manifest has no sealed 'ok' entry for symbol {symbol!r}: "
-                f"{manifest.get('dataset_id')!r}"
+                f"manifest carries an unknown timeframe "
+                f"{manifest.get('timeframe')!r}; cannot locate the sealed "
+                "store artifact"
             )
-        sealed_hash = symbol_entry.get("content_sha256")
-        actual_hash = _content_sha256(df)
-        if not sealed_hash or actual_hash != sealed_hash:
+        df = store.load(pair_slug(pair), tf_file)
+        if df is None:
             raise ManifestNotSignalEligibleError(
-                f"df content for {symbol!r} does not match the manifest's "
-                f"sealed content_sha256 (sealed={sealed_hash!r}, "
-                f"actual={actual_hash!r}) — this is either a tampered/modified "
-                f"frame or the wrong symbol's data, and cannot back this "
-                f"session's signal regardless of its timestamps"
+                f"sealed store artifact missing or empty for {pair!r} "
+                f"({pair_slug(pair)}/{tf_file}.parquet under {store.data_dir}) — "
+                "the manifest certifies content this store does not hold"
             )
-        return bars_eligible_for_session(df, session_date)
-    return None
+    sealed_hash = symbol_entry.get("content_sha256")
+    actual_hash = _content_sha256(df)
+    if not sealed_hash or actual_hash != sealed_hash:
+        raise ManifestNotSignalEligibleError(
+            f"bar content for {pair!r} does not match the manifest's "
+            f"sealed content_sha256 (sealed={sealed_hash!r}, "
+            f"actual={actual_hash!r}) — this is either a tampered/modified "
+            f"frame or the wrong symbol's data, and cannot back this "
+            f"session's signal regardless of its timestamps"
+        )
+    return bars_eligible_for_session(df, session_date)
 
 
 # ---------------------------------------------------------------------------
