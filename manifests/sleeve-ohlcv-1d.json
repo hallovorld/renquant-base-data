@@ -1,0 +1,14 @@
+{
+  "dataset_id": "sleeve-ohlcv-1d",
+  "schema_version": "sleeve-ohlcv-manifest-v1",
+  "fingerprint": "sha256:stamped-per-ingestion-run-see-live-manifest",
+  "uri": "store://ohlcv/1d",
+  "asset_class": "us_equity",
+  "retention_class": "prod",
+  "provider": "yfinance",
+  "source": "yfinance via renquant_base_data.loaders.data.fetch_ohlcv_incremental (cache-first, incremental, timeout-protected)",
+  "owner": "renquant-base-data",
+  "freshness_rule": "every expected leg's last bar >= last completed NYSE session (loaders.data.LocalStore.has_range, session-aware); serving_eligible in the live manifest is the single consumer verdict",
+  "validation_command": "python -m renquant_base_data.sleeve_bars --verify",
+  "note": "Registry entry for the parking-sleeve equity daily bar dataset (SPY + SGOV legs; RS-1 SGOV floor, renquant-pipeline#185 data dependency; supersedes umbrella RenQuant#459 per Codex repo-ownership verdict). The authoritative, fingerprinted per-run manifest with per-symbol content sha256 and the serving_eligible verdict is written by renquant_base_data.sleeve_bars.ingest_sleeve_bars to <store>/ingestion_manifest_sleeve_1d.json; consumers resolve bars through renquant_base_data.sleeve_bars.resolve_sleeve_leg_bars pinned by that manifest's fingerprint. Symbol normalization is mirror-pinned against the umbrella adapters/sleeve_prices.parking_sleeve_leg_tickers helper (tests/test_sleeve_bars.py). SGOV must never join the tradable watchlist (st104#39): this dataset is price coverage only and cannot move the panel config fingerprint (P-CONFIG-FP hashes watchlist/panel_ltr/sector fields only)."
+}
