@@ -241,7 +241,21 @@ def fetch_ohlcv(
     (yfinance / OpenBB) hangs (classic CLOSE_WAIT socket leak), the call
     returns None instead of blocking forever. Notebook was observed
     hanging 4 hours on a yfinance call 2026-04-24 — this prevents that.
+
+    Providers: ``yfinance`` (equities — the original, unchanged path) and
+    ``alpaca_crypto`` (crypto RFC D-C2/B1). The crypto branch delegates
+    IMMEDIATELY to ``renquant_base_data.crypto_bars`` — its own slug store
+    (``data/crypto_ohlcv/{SLUG}/1d.parquet``), UTC-day freshness clock and
+    sealed ingestion manifest — so the equity store, NYSE freshness rule and
+    yfinance fetch below stay byte-identical for equity callers.
     """
+    if provider == "alpaca_crypto":
+        from renquant_base_data.crypto_bars import fetch_crypto_daily_cached  # noqa: PLC0415
+
+        return fetch_crypto_daily_cached(
+            symbol, start=start, end=end, cache=cache, timeout_sec=timeout_sec
+        )
+
     store = _default_store
 
     if cache and store.has_range(symbol, start=start, end=end):
@@ -274,7 +288,9 @@ def fetch_ohlcv(
                 f"for cached history."
             )
     else:
-        raise ValueError(f"Unknown provider {provider!r}. Supported: ['yfinance']")
+        raise ValueError(
+            f"Unknown provider {provider!r}. Supported: ['yfinance', 'alpaca_crypto']"
+        )
 
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index)
