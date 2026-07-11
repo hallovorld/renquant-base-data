@@ -20,8 +20,11 @@ B6, §3.3, §3.5):
   coincides with yfinance's crypto ticker format, so the two-source
   cross-check needs no third form. ``pair_slug``/``slug_pair`` here are the
   repo-local stand-in for the shared helper the RFC places in
-  renquant-common (deliverable D-C1, not yet merged); when D-C1 lands this
-  module repoints to it — semantics are frozen by tests to be identical.
+  renquant-common; common#27 (merged 2026-07-10) shipped ONLY the
+  ALWAYS_OPEN calendar half of D-C1 — verified: no pair/slug helper exists
+  anywhere in renquant-common main — so the symbol helpers remain local,
+  semantics frozen by round-trip tests, and repoint whenever common ships
+  the canonical helper.
 
 * **24/7 session semantics + watermark (B3, RFC §3.5)** — bars are keyed by
   UTC calendar day. Session D's signal may consume ONLY bars whose close
@@ -44,35 +47,26 @@ B6, §3.3, §3.5):
   calendar days. Either way the stored daily grid is UTC-midnight keyed by
   construction.
 
-* **Freshness clock (B3)** — crypto freshness uses "last completed UTC day",
-  the ALWAYS_OPEN stand-in until renquant-common ships the canonical
-  always-open calendar (D-C1/M2). NYSE freshness logic is never consulted.
+* **Freshness clock (B3)** — crypto freshness uses "last completed UTC day"
+  via the CANONICAL always-open calendar
+  (``renquant_common.market_calendar``, ``calendar_name="ALWAYS_OPEN"``,
+  common#27). The pre-#27 local computation is gone; an older
+  renquant-common fails closed with a structural, named error (no fallback
+  clock — see :func:`_require_always_open_calendar`). NYSE freshness logic
+  is never consulted.
 
 Boundaries: ingestion + feature groundwork ONLY. No labels (SPY-excess label
 stays equity-only; crypto labels are D-C4/D-C3 scope), no decision logic, no
 broker/order logic.
 
-.. admonition:: TODO(D-C1 dependency, tracked — Codex review round 1 on #41)
-
-   ``pair_slug``/``slug_pair``/``last_completed_utc_session`` below are a
-   REPO-LOCAL DUPLICATE of the canonical ``renquant-common`` primitives the
-   RFC assigns to deliverable D-C1 (``doc/design/2026-07-10-crypto-trading-
-   rfc.md`` §7: "ALWAYS_OPEN calendar mode in ``market_calendar`` +
-   ``pair_slug`` symbol helper"). D-C1 does not exist yet as a merged PR in
-   any repo. This PR stays in DRAFT until it does, per Codex's explicit
-   instruction — merging a "repoint later" duplicate would recreate exactly
-   the duplicated-contract class the architecture-compliance audit
-   (orchestrator#454) was merged to eliminate.
-
-   **Required follow-up once D-C1 lands** (not optional cleanup):
-   1. Delete the local ``pair_slug``/``slug_pair``/``last_completed_utc_
-      session`` implementations here; import the ``renquant-common``
-      versions instead.
-   2. Add a cross-repo parity test asserting the two are behaviorally
-      identical (or, once deleted, that this module's own tests still pass
-      unchanged against the imported common helper — proving the semantics
-      really were frozen, not just documented as such).
-   3. Only then may this PR come out of draft.
+D-C1 dependency status (Codex review round 1 on #41 — resolved for the
+calendar, still open for symbols): common#27 merged 2026-07-10 and this
+module now consumes the canonical ALWAYS_OPEN calendar (repoint done; the
+boundary tests that pinned the stand-in's semantics pass unchanged against
+the canonical, proving the freeze). The ``pair_slug`` symbol-helper half of
+D-C1 has NOT shipped in renquant-common (verified against merged main); the
+strict local helpers above stay until it does, with round-trip tests
+freezing their semantics for that future repoint.
 """
 from __future__ import annotations
 
@@ -207,15 +201,43 @@ def session_watermark_utc(session_date: "date | str | pd.Timestamp") -> pd.Times
     return d.tz_localize("UTC")
 
 
+def _require_always_open_calendar():
+    """Structural requirement on renquant-common's ALWAYS_OPEN calendar
+    (common#27). Fail-closed, NO local fallback: an older renquant-common
+    checkout/install must produce this loud, named error — never a silently
+    different freshness clock (the same structural-version-requirement
+    pattern as base-data#183's market-calendar repoint)."""
+    from renquant_common import market_calendar as mc  # noqa: PLC0415
+
+    if not hasattr(mc, "ALWAYS_OPEN_CALENDAR_NAME"):
+        raise RuntimeError(
+            "renquant_common.market_calendar lacks ALWAYS_OPEN_CALENDAR_NAME — "
+            "the installed renquant-common predates the ALWAYS_OPEN calendar "
+            "mode (common#27, crypto RFC D-C1). Crypto session semantics "
+            "REQUIRE the canonical always-open calendar; upgrade the "
+            "renquant-common checkout/install. Fail-closed by design: there "
+            "is deliberately no local fallback clock."
+        )
+    return mc
+
+
 def last_completed_utc_session(ref=None) -> date:
     """Last fully-completed UTC calendar day as of ``ref`` (default: now).
 
-    ALWAYS_OPEN semantics: every UTC day is a session; day X is complete once
-    ``X+1 00:00 UTC`` has been reached. Local stand-in for the canonical
-    always-open calendar (renquant-common D-C1/M2).
+    Delegates to the CANONICAL always-open calendar,
+    ``renquant_common.market_calendar.last_completed_session(...,
+    calendar_name=ALWAYS_OPEN_CALENDAR_NAME)`` (common#27): every UTC day is
+    a session; day X is complete once ``X+1 00:00 UTC`` has been reached (at
+    exactly midnight the just-ended day counts). This module's tests pin the
+    boundary semantics, so the repoint from the pre-#27 local stand-in is
+    proven behavior-identical. Requires common#27 structurally — see
+    :func:`_require_always_open_calendar`.
     """
+    mc = _require_always_open_calendar()
     ref_ts = _to_utc(ref) if ref is not None else _utc_now()
-    return (ref_ts.normalize() - pd.Timedelta(days=1)).date()
+    return mc.last_completed_session(
+        ref_ts, calendar_name=mc.ALWAYS_OPEN_CALENDAR_NAME
+    )
 
 
 def bars_eligible_for_session(df: pd.DataFrame, session_date) -> pd.DataFrame:

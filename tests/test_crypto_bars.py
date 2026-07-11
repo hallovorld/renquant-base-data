@@ -123,6 +123,33 @@ def test_last_completed_utc_session() -> None:
     assert last_completed_utc_session(ref) == date(2026, 7, 9)
     # One second before midnight, day 07-09 is not complete yet.
     assert last_completed_utc_session(pd.Timestamp("2026-07-09T23:59:59Z")) == date(2026, 7, 8)
+    # At exactly midnight the just-ended day counts (canonical #27 rule).
+    assert last_completed_utc_session(pd.Timestamp("2026-07-10T00:00:00Z")) == date(2026, 7, 9)
+
+
+def test_last_completed_utc_session_matches_canonical_calendar() -> None:
+    """Repoint parity (D-C1/common#27): this module's freshness clock IS the
+    canonical ALWAYS_OPEN calendar — same answer, by delegation."""
+    from renquant_common.market_calendar import (
+        ALWAYS_OPEN_CALENDAR_NAME,
+        last_completed_session,
+    )
+
+    for ref in ("2026-07-10T13:37:00Z", "2026-07-10T00:00:00Z", "2026-01-01T00:00:01Z"):
+        ts = pd.Timestamp(ref)
+        assert last_completed_utc_session(ts) == last_completed_session(
+            ts, calendar_name=ALWAYS_OPEN_CALENDAR_NAME
+        )
+
+
+def test_last_completed_utc_session_fails_closed_on_pre27_common(monkeypatch) -> None:
+    """#183 pattern: a renquant-common checkout predating common#27 must
+    produce a loud structural error — never a silent local fallback clock."""
+    import renquant_common.market_calendar as mc
+
+    monkeypatch.delattr(mc, "ALWAYS_OPEN_CALENDAR_NAME")
+    with pytest.raises(RuntimeError, match="common#27"):
+        last_completed_utc_session(pd.Timestamp("2026-07-10T00:00:01Z"))
 
 
 def _daily_frame(days: list[str], *, close_offset_days: int = 1) -> pd.DataFrame:

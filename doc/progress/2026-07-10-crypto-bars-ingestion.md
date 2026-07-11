@@ -233,3 +233,31 @@ Tests: `tests/test_crypto_bars.py` 64 → 67. Full repo suite: 361 passed
 sibling-path artifact; passes in the primary checkout). PR remains DRAFT on
 the D-C1 renquant-common prerequisite (canonical always-open calendar +
 `pair_slug` helper); the local stand-ins repoint when D-C1 lands.
+
+## D-C1 repoint (common#27 merged 2026-07-10) — out of draft
+
+common#27 shipped the canonical ALWAYS_OPEN calendar
+(`renquant_common.market_calendar`, `ALWAYS_OPEN_CALENDAR_NAME`,
+`last_completed_session(..., calendar_name="ALWAYS_OPEN")`,
+`AlwaysOpenSessionCalendar`; renquant-common 0.11.0). Repoint done:
+
+- `last_completed_utc_session` now DELEGATES to the canonical
+  `last_completed_session(..., calendar_name=ALWAYS_OPEN_CALENDAR_NAME)` —
+  the pre-#27 local computation is deleted. Behavior identity is proven by
+  the unchanged boundary tests plus a new direct parity test against the
+  canonical, including the exactly-midnight rule (just-ended day counts).
+- **Structural version requirement, fail closed (#183 pattern)**: a
+  renquant-common predating #27 (no `ALWAYS_OPEN_CALENDAR_NAME` attribute)
+  raises a named `RuntimeError` — deliberately NO local fallback clock.
+  Pinned by test (attribute removed via monkeypatch → structural error).
+  Packaging floor bumped to `renquant-common>=0.11`.
+- **Scope note [VERIFIED]**: #27 shipped ONLY the calendar half of D-C1 —
+  no `pair_slug`/`slug_pair` helper exists anywhere in renquant-common
+  main. The strict local symbol helpers therefore remain (documented),
+  with round-trip tests freezing their semantics for the future repoint
+  when common ships the canonical helper.
+
+Tests: `tests/test_crypto_bars.py` 67 → 69. Full suite: 363 passed (same
+single known worktree-environment `test_fetchers_lift` failure; passes in
+the primary checkout). PR leaves DRAFT: both Codex provenance fixes are in
+and the external calendar prerequisite is satisfied.
