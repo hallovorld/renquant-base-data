@@ -79,6 +79,40 @@ def test_slug_pair_rejects_malformed(bad: str) -> None:
         slug_pair(bad)
 
 
+def test_pair_slug_matches_canonical_common_helper() -> None:
+    """Repoint parity (D-C1/common#29): this module's pair_slug/slug_pair
+    ARE the canonical renquant_common.pair_slug helper — same answer, by
+    delegation, across the whole malformed-input battery too."""
+    from renquant_common.pair_slug import pair_slug as common_pair_slug
+    from renquant_common.pair_slug import slug_pair as common_slug_pair
+
+    for pair in ("BTC/USD", "ETH/USD", " btc/usd "):
+        assert pair_slug(pair) == common_pair_slug(pair)
+    for slug in ("BTC-USD", "ETH-USD", " btc-usd "):
+        assert slug_pair(slug) == common_slug_pair(slug)
+    for bad in ("BTCUSD", "BTC/USD/X", "BTC-USD", "", "/USD", "BTC/"):
+        with pytest.raises(ValueError):
+            common_pair_slug(bad)
+
+
+def test_pair_slug_fails_closed_on_pre29_common(monkeypatch) -> None:
+    """#41-calendar pattern (test_last_completed_utc_session_fails_closed_
+    on_pre27_common): a renquant-common checkout predating common#29 must
+    produce a loud structural error — never a silent local fallback
+    symbol-normalization implementation. Simulated via hasattr (the same
+    idiom the calendar fail-closed test uses), not a simulated ImportError
+    -- the real pair_slug.py file genuinely exists on disk in this test
+    environment, so faking "module doesn't exist" isn't meaningfully
+    mockable here; the module's own required-surface check is."""
+    import renquant_common.pair_slug as ps
+
+    monkeypatch.delattr(ps, "as_pair")
+    with pytest.raises(RuntimeError, match="common#29"):
+        pair_slug("BTC/USD")
+    with pytest.raises(RuntimeError, match="common#29"):
+        slug_pair("BTC-USD")
+
+
 def test_ingest_rejects_malformed_pair_fast(tmp_path: Path) -> None:
     # Found by CLI probing: "BTC/USD/X" must fail at symbol validation,
     # not silently produce a no_data manifest entry.

@@ -18,13 +18,12 @@ B6, §3.3, §3.5):
   configs and all broker/data API calls; canonical SLUG form ``"BTC-USD"``
   (slash→dash) for every file path, directory and cache key. The slug form
   coincides with yfinance's crypto ticker format, so the two-source
-  cross-check needs no third form. ``pair_slug``/``slug_pair`` here are the
-  repo-local stand-in for the shared helper the RFC places in
-  renquant-common; common#27 (merged 2026-07-10) shipped ONLY the
-  ALWAYS_OPEN calendar half of D-C1 — verified: no pair/slug helper exists
-  anywhere in renquant-common main — so the symbol helpers remain local,
-  semantics frozen by round-trip tests, and repoint whenever common ships
-  the canonical helper.
+  cross-check needs no third form. ``pair_slug``/``slug_pair``/``_as_pair``/
+  ``_as_slug`` here delegate to the CANONICAL
+  ``renquant_common.pair_slug`` (common#29, D-C1 complete): the local
+  stand-in is gone, an older renquant-common fails closed with a
+  structural, named error (no fallback — see
+  :func:`_require_common_pair_slug`).
 
 * **24/7 session semantics + watermark (B3, RFC §3.5)** — bars are keyed by
   UTC calendar day. Session D's signal may consume ONLY bars whose close
@@ -59,14 +58,13 @@ Boundaries: ingestion + feature groundwork ONLY. No labels (SPY-excess label
 stays equity-only; crypto labels are D-C4/D-C3 scope), no decision logic, no
 broker/order logic.
 
-D-C1 dependency status (Codex review round 1 on #41 — resolved for the
-calendar, still open for symbols): common#27 merged 2026-07-10 and this
-module now consumes the canonical ALWAYS_OPEN calendar (repoint done; the
-boundary tests that pinned the stand-in's semantics pass unchanged against
-the canonical, proving the freeze). The ``pair_slug`` symbol-helper half of
-D-C1 has NOT shipped in renquant-common (verified against merged main); the
-strict local helpers above stay until it does, with round-trip tests
-freezing their semantics for that future repoint.
+D-C1 dependency status (Codex review round 1 on #41): D-C1 is COMPLETE.
+common#27 (calendar, merged 2026-07-10) and common#29 (pair/slug symbol
+helper, merged 2026-07-11) are both consumed canonically — the pre-#27
+calendar stand-in and the pre-#29 symbol-helper stand-in are both gone.
+The round-trip tests that pinned each stand-in's semantics pass unchanged
+against the canonical implementations, proving both repoints are
+behavior-identity, not merely "the tests still pass."
 """
 from __future__ import annotations
 
@@ -121,52 +119,77 @@ _CONTENT_SHA_COLS = ["open", "high", "low", "close", "volume", BAR_CLOSE_COL]
 
 
 # ---------------------------------------------------------------------------
-# Symbol policy (RFC §3.0) — local stand-in for renquant-common D-C1
+# Symbol policy (RFC §3.0) — canonical renquant-common D-C1 helper
 # ---------------------------------------------------------------------------
+
+def _require_common_pair_slug():
+    """Structural requirement on renquant-common's pair/slug helper
+    (common#29, merged as 0.13.0). Fail-closed, NO local fallback: an older
+    renquant-common checkout/install must produce this loud, named error —
+    never a silently different symbol-normalization implementation (the
+    same structural-version-requirement pattern as
+    :func:`_require_always_open_calendar`).
+
+    Two distinct failure modes, both fail-closed: the module doesn't exist
+    at all (a real pre-#29 checkout — ``ImportError``), or it imports but
+    lacks the expected surface (testable via monkeypatch without needing to
+    fake a missing file on disk — the same ``hasattr`` idiom
+    :func:`_require_always_open_calendar` uses)."""
+    try:
+        from renquant_common import pair_slug as ps  # noqa: PLC0415
+    except ImportError as exc:
+        raise RuntimeError(
+            "renquant_common.pair_slug is not importable — the installed "
+            "renquant-common predates the pair/slug symbol helper (common#29, "
+            "crypto RFC D-C1). Crypto symbol normalization REQUIRES the "
+            "canonical helper; upgrade the renquant-common checkout/install. "
+            "Fail-closed by design: there is deliberately no local fallback."
+        ) from exc
+    if not hasattr(ps, "as_pair"):
+        raise RuntimeError(
+            "renquant_common.pair_slug lacks as_pair — the installed "
+            "renquant-common predates the pair/slug symbol helper (common#29, "
+            "crypto RFC D-C1). Crypto symbol normalization REQUIRES the "
+            "canonical helper; upgrade the renquant-common checkout/install. "
+            "Fail-closed by design: there is deliberately no local fallback."
+        )
+    return ps
+
 
 def pair_slug(pair: str) -> str:
     """Canonical pair form -> canonical slug form: ``"BTC/USD"`` -> ``"BTC-USD"``.
 
-    Strict by design: the input must be pair form (exactly one ``/``, both
-    sides non-empty, no ``-``). Malformed symbols raise instead of silently
-    producing a colliding cache key (gap B5: ``"BTC/USD"`` used as a path
-    creates a nested ``BTC/USD/`` directory).
+    Delegates to the CANONICAL ``renquant_common.pair_slug`` (common#29):
+    round-trip tests below pin behavior-identity with the pre-#29 local
+    stand-in this repoints from. Requires common#29 structurally — see
+    :func:`_require_common_pair_slug`.
     """
-    p = str(pair).strip().upper()
-    if p.count("/") != 1 or "-" in p:
-        raise ValueError(f"not a canonical crypto pair (expected 'BASE/QUOTE'): {pair!r}")
-    base, _, quote = p.partition("/")
-    if not base or not quote:
-        raise ValueError(f"not a canonical crypto pair (expected 'BASE/QUOTE'): {pair!r}")
-    return f"{base}-{quote}"
+    return _require_common_pair_slug().pair_slug(pair)
 
 
 def slug_pair(slug: str) -> str:
     """Canonical slug form -> canonical pair form: ``"BTC-USD"`` -> ``"BTC/USD"``.
 
-    Exact inverse of :func:`pair_slug`; round-trip is pinned by tests.
+    Delegates to the CANONICAL ``renquant_common.pair_slug`` (common#29);
+    exact inverse of :func:`pair_slug`, round-trip pinned by tests.
     """
-    s = str(slug).strip().upper()
-    if s.count("-") != 1 or "/" in s:
-        raise ValueError(f"not a canonical crypto slug (expected 'BASE-QUOTE'): {slug!r}")
-    base, _, quote = s.partition("-")
-    if not base or not quote:
-        raise ValueError(f"not a canonical crypto slug (expected 'BASE-QUOTE'): {slug!r}")
-    return f"{base}/{quote}"
+    return _require_common_pair_slug().slug_pair(slug)
 
 
 def _as_pair(symbol: str) -> str:
-    """Accept either canonical form, return validated pair form."""
-    s = str(symbol).strip().upper()
-    # Round-trip through the strict helpers so malformed symbols
-    # (e.g. "BTC/USD/X") are rejected here, not deep in the store layer.
-    return slug_pair(pair_slug(s)) if "/" in s else slug_pair(s)
+    """Accept either canonical form, return validated pair form.
+
+    Delegates to the CANONICAL ``renquant_common.pair_slug.as_pair``.
+    """
+    return _require_common_pair_slug().as_pair(symbol)
 
 
 def _as_slug(symbol: str) -> str:
-    """Accept either canonical form, return slug form."""
-    s = str(symbol).strip().upper()
-    return pair_slug(s) if "/" in s else pair_slug(slug_pair(s))
+    """Accept either canonical form, return slug form.
+
+    Delegates to the CANONICAL ``renquant_common.pair_slug.as_slug``.
+    """
+    return _require_common_pair_slug().as_slug(symbol)
 
 
 # ---------------------------------------------------------------------------
