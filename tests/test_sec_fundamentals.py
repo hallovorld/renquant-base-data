@@ -143,4 +143,5 @@ def test_cli_dry_run_plans_without_alpha_or_network(tmp_path: Path, capsys: pyte
     assert rc == 0
     out = capsys.readouterr().out
     assert '"dry_run": true' in out
-    assert '"daily_planned_requests": 24' in out
+    # 13 concepts (6 primary + 7 FALLBACK_CONCEPTS, ratio-coverage fix) x 4 quarters.
+    assert '"daily_planned_requests": 52' in out
