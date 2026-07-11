@@ -1,0 +1,14 @@
+{
+  "dataset_id": "sec-fundamentals-daily",
+  "schema_version": "sec-fundamentals-manifest-v1",
+  "fingerprint": "sha256:stamped-per-ingestion-run-see-live-manifest",
+  "uri": "store://sec_fundamentals_daily.parquet",
+  "asset_class": "us_equity",
+  "retention_class": "prod",
+  "provider": "sec-edgar-frames",
+  "source": "SEC EDGAR XBRL frames API via renquant_base_data.sec_fundamentals (weekly refresh cron; FMP income-statement acceptedDate backfills point-in-time availability)",
+  "owner": "renquant-base-data",
+  "freshness_rule": "serving date axis reaches the latest OHLCV price date (resolve_serving_daily_index, decoupled from the alpha158 training-label clip); per-entity quarterly snapshots advance within the ~45d SEC filing lag (fiscal_period_end/available_at provenance columns; consumer gate renquant-pipeline P-FUND-FRESHNESS)",
+  "validation_command": "python -m renquant_base_data.sec_fundamentals --verify --data-dir <data_dir>",
+  "note": "Registry entry for the daily serving fundamentals feature feed (earnings_yield, book_to_price, gross_profitability, roe, asset_growth consumed by panel scoring). The authoritative, fingerprinted per-run manifest with per-feature finite-coverage fractions (coverage/n_have/n_expected/min_coverage — field vocabulary aligned with renquant-pipeline DataAvailabilityGate data_contracts.v1 axis contracts, fundamentals_serving_axis) and the coverage_ok verdict is written by renquant_base_data.sec_fundamentals.write_daily_ingestion_manifest to <data_dir>/ingestion_manifest_sec_fundamentals_daily.json (fingerprint impl reused from crypto_bars — single impl). IMPUTED-SHARE guard rationale (orchestrator PR #475, 2026-07-11): every non-finite feature cell is silently cross-sectional-median-imputed by the panel scorer, so finite coverage IS the complement of the imputed share; the build WARNS below floor (degrade_with_alarm) and --verify FAILS, so a coverage regression can never again sit dark for months."
+}
