@@ -98,6 +98,9 @@ def build_features_for_pair(
     return feats
 
 
+FFILL_LIMIT_DAYS = 3
+
+
 def compute_forward_returns(
     ohlcv: pd.DataFrame,
     slug: str,
@@ -105,20 +108,39 @@ def compute_forward_returns(
     horizons: tuple[int, ...] = DEFAULT_LABEL_HORIZONS,
     btc_close: pd.Series | None = None,
 ) -> pd.DataFrame:
-    """Compute raw and optionally BTC-excess forward returns."""
+    """Compute raw and optionally BTC-excess forward returns.
+
+    Labels are in UTC calendar days: both the pair and BTC close series
+    are reindexed to a complete daily calendar before shifting, so
+    ``shift(-n)`` always means exactly *n* calendar days forward
+    regardless of missing observations.  Gaps beyond ``FFILL_LIMIT_DAYS``
+    produce NaN (no silent extrapolation).
+    """
     c = ohlcv["close"].sort_index()
+    max_horizon = max(horizons)
+    cal = pd.date_range(
+        c.index.min(),
+        c.index.max() + pd.Timedelta(days=max_horizon),
+        freq="D",
+    )
+    c_cal = c.reindex(cal, method="ffill", limit=FFILL_LIMIT_DAYS)
+
+    output_dates = c.index
     rec: dict[str, pd.Series] = {
-        "pair": pd.Series(slug, index=c.index),
-        "date": pd.Series(c.index, index=c.index),
+        "pair": pd.Series(slug, index=output_dates),
+        "date": pd.Series(output_dates, index=output_dates),
     }
     for n in horizons:
-        fwd = c.shift(-n) / c - 1
-        rec[f"fwd_{n}d"] = fwd
+        fwd = c_cal.shift(-n) / c_cal - 1
+        rec[f"fwd_{n}d"] = fwd.reindex(output_dates)
         if btc_close is not None:
-            btc = btc_close.sort_index()
-            btc_aligned = btc.reindex(c.index, method="ffill", tolerance=pd.Timedelta(days=3))
-            fwd_btc = btc_aligned.shift(-n) / btc_aligned - 1
-            rec[f"fwd_{n}d_btc_excess"] = fwd - fwd_btc
+            btc_cal = btc_close.sort_index().reindex(
+                cal, method="ffill", limit=FFILL_LIMIT_DAYS,
+            )
+            fwd_btc = btc_cal.shift(-n) / btc_cal - 1
+            rec[f"fwd_{n}d_btc_excess"] = (
+                fwd.reindex(output_dates) - fwd_btc.reindex(output_dates)
+            )
     return pd.DataFrame(rec)
 
 
@@ -209,7 +231,19 @@ def build_crypto_panel(cfg: CryptoPanelConfig) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     panel.to_parquet(out_path, index=False)
 
-    content_hash = hashlib.sha256(panel.to_csv(index=False).encode()).hexdigest()[:16]
+    parquet_sha256 = hashlib.sha256(out_path.read_bytes()).hexdigest()
+
+    input_bar_digests: dict[str, str] = {}
+    for slug in sorted(panel["pair"].unique().tolist()):
+        bar_path = store_dir / slug / "1d.parquet"
+        if bar_path.exists():
+            input_bar_digests[slug] = hashlib.sha256(bar_path.read_bytes()).hexdigest()
+
+    feature_config_digest = hashlib.sha256(
+        json.dumps(sorted(feature_cols), sort_keys=True).encode()
+    ).hexdigest()
+
+    has_btc_excess = cfg.btc_excess and btc_close is not None
     manifest = {
         "schema_version": "crypto-alpha158-panel-v1",
         "output_path": str(out_path),
@@ -221,16 +255,23 @@ def build_crypto_panel(cfg: CryptoPanelConfig) -> Path:
         "label_cols": [c for c in panel.columns if c.startswith("fwd_")],
         "pairs": sorted(panel["pair"].unique().tolist()),
         "date_range": [str(panel["date"].min().date()), str(panel["date"].max().date())],
-        "content_sha256_prefix": content_hash,
-        "label_horizons": list(cfg.label_horizons),
-        "btc_excess": cfg.btc_excess and btc_close is not None,
+        "parquet_sha256": parquet_sha256,
+        "input_bar_digests": input_bar_digests,
+        "feature_config_digest": feature_config_digest,
+        "label_contract": {
+            "type": "calendar_day_forward_return",
+            "horizons_calendar_days": list(cfg.label_horizons),
+            "ffill_limit_days": FFILL_LIMIT_DAYS,
+            "btc_excess": has_btc_excess,
+        },
+        "btc_excess": has_btc_excess,
     }
     manifest_path = out_path.with_suffix(".manifest.json")
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
     log.info(
-        "Crypto panel written: %s (%d rows, %d pairs, %d dates, hash=%s)",
-        out_path, len(panel), n_pairs, n_dates, content_hash,
+        "Crypto panel written: %s (%d rows, %d pairs, %d dates, sha256=%s)",
+        out_path, len(panel), n_pairs, n_dates, parquet_sha256[:16],
     )
     return out_path
 
