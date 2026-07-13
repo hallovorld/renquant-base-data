@@ -125,6 +125,8 @@ def compute_forward_returns(
     )
     c_cal = c.reindex(cal, method="ffill", limit=FFILL_LIMIT_DAYS)
 
+    real_obs = c.reindex(cal).notna()
+
     output_dates = c.index
     rec: dict[str, pd.Series] = {
         "pair": pd.Series(slug, index=output_dates),
@@ -132,15 +134,20 @@ def compute_forward_returns(
     }
     for n in horizons:
         fwd = c_cal.shift(-n) / c_cal - 1
-        rec[f"fwd_{n}d"] = fwd.reindex(output_dates)
+        terminal_has_real = real_obs.shift(-n).reindex(output_dates).fillna(False).infer_objects(copy=False)
+        fwd_out = fwd.reindex(output_dates)
+        fwd_out = fwd_out.where(terminal_has_real, other=np.nan)
+        rec[f"fwd_{n}d"] = fwd_out
         if btc_close is not None:
             btc_cal = btc_close.sort_index().reindex(
                 cal, method="ffill", limit=FFILL_LIMIT_DAYS,
             )
+            btc_real = btc_close.sort_index().reindex(cal).notna()
             fwd_btc = btc_cal.shift(-n) / btc_cal - 1
-            rec[f"fwd_{n}d_btc_excess"] = (
-                fwd.reindex(output_dates) - fwd_btc.reindex(output_dates)
-            )
+            btc_terminal_has_real = btc_real.shift(-n).reindex(output_dates).fillna(False).infer_objects(copy=False)
+            excess = fwd_out - fwd_btc.reindex(output_dates)
+            excess = excess.where(terminal_has_real & btc_terminal_has_real, other=np.nan)
+            rec[f"fwd_{n}d_btc_excess"] = excess
     return pd.DataFrame(rec)
 
 
@@ -244,6 +251,37 @@ def build_crypto_panel(cfg: CryptoPanelConfig) -> Path:
     ).hexdigest()
 
     has_btc_excess = cfg.btc_excess and btc_close is not None
+
+    observation_end: dict[str, str] = {}
+    label_available_at: dict[str, dict[str, str | None]] = {}
+    for slug in sorted(panel["pair"].unique().tolist()):
+        pair_rows = panel[panel["pair"] == slug]
+        ohlcv = _load_ohlcv(store, slug)
+        if ohlcv is not None:
+            observation_end[slug] = str(ohlcv.index.max().date())
+        label_avail: dict[str, str | None] = {}
+        for n in cfg.label_horizons:
+            col = f"fwd_{n}d"
+            if col in pair_rows.columns:
+                valid = pair_rows[pair_rows[col].notna()]
+                label_avail[col] = str(valid["date"].max().date()) if not valid.empty else None
+            else:
+                label_avail[col] = None
+        label_available_at[slug] = label_avail
+
+    input_bar_watermarks: dict[str, str] = {}
+    for slug in sorted(panel["pair"].unique().tolist()):
+        ohlcv = _load_ohlcv(store, slug)
+        if ohlcv is not None:
+            input_bar_watermarks[slug] = str(ohlcv.index.max().date())
+
+    cal_start = str(panel["date"].min().date())
+    cal_end = str(panel["date"].max().date())
+    calendar_identity = hashlib.sha256(
+        json.dumps({"freq": "D", "tz": "UTC", "start": cal_start, "end": cal_end},
+                   sort_keys=True).encode()
+    ).hexdigest()
+
     manifest = {
         "schema_version": "crypto-alpha158-panel-v1",
         "output_path": str(out_path),
@@ -254,15 +292,20 @@ def build_crypto_panel(cfg: CryptoPanelConfig) -> Path:
         "feature_cols": feature_cols,
         "label_cols": [c for c in panel.columns if c.startswith("fwd_")],
         "pairs": sorted(panel["pair"].unique().tolist()),
-        "date_range": [str(panel["date"].min().date()), str(panel["date"].max().date())],
+        "date_range": [cal_start, cal_end],
         "parquet_sha256": parquet_sha256,
         "input_bar_digests": input_bar_digests,
+        "input_bar_watermarks": input_bar_watermarks,
         "feature_config_digest": feature_config_digest,
+        "calendar_identity_digest": calendar_identity,
+        "observation_end": observation_end,
+        "label_available_at": label_available_at,
         "label_contract": {
             "type": "calendar_day_forward_return",
             "horizons_calendar_days": list(cfg.label_horizons),
             "ffill_limit_days": FFILL_LIMIT_DAYS,
             "btc_excess": has_btc_excess,
+            "terminal_obs_required": True,
         },
         "btc_excess": has_btc_excess,
     }

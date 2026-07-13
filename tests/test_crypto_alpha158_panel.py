@@ -120,8 +120,8 @@ class TestComputeForwardReturns:
         Create OHLCV with a 7-day gap (Jan 5 -> Jan 13).  With row-based
         shift, fwd_5d at Jan 4 would reach row index+5 = Jan 17 (skipping
         the gap entirely).  With calendar-day shift, it reaches Jan 9
-        which is in the middle of the gap (4 days after last observation
-        on Jan 5) — beyond FFILL_LIMIT_DAYS (3), so NaN.
+        which is in the middle of the gap — no real observation, so NaN.
+        Labels are only valid when the terminal date has a real observation.
         """
         dates = pd.to_datetime([
             "2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04", "2025-01-05",
@@ -136,38 +136,46 @@ class TestComputeForwardReturns:
 
         labels = compute_forward_returns(ohlcv, "TEST", horizons=(5,))
 
-        # Jan 4 + 5 calendar days = Jan 9.  Jan 9 is 4 days after
-        # the last pre-gap observation (Jan 5), beyond FFILL_LIMIT_DAYS=3
-        # -> NaN.  A row-based shift would have returned 204/103-1.
+        # Jan 4 + 5 = Jan 9 — no real observation at Jan 9 (in 7-day gap)
+        # -> NaN, both from ffill gap AND terminal-obs requirement.
         row_jan4 = labels.loc[labels["date"] == pd.Timestamp("2025-01-04")]
         assert row_jan4["fwd_5d"].isna().all(), (
             "fwd_5d at Jan 4 should be NaN: the 5-calendar-day target "
-            "falls beyond the ffill limit in the gap"
+            "falls in the gap with no real observation"
         )
 
-        # Jan 1 + 5 calendar days = Jan 6.  Jan 6 is 1 day after Jan 5
-        # (within ffill limit) -> ffilled close = 104.
+        # Jan 1 + 5 = Jan 6 — no real observation at Jan 6 (gap starts)
+        # -> NaN due to terminal-obs requirement.
         row_jan1 = labels.loc[labels["date"] == pd.Timestamp("2025-01-01")]
-        expected = 104 / 100 - 1
-        actual = row_jan1["fwd_5d"].iloc[0]
+        assert row_jan1["fwd_5d"].isna().all(), (
+            "fwd_5d at Jan 1 should be NaN: no real observation at Jan 6"
+        )
+
+        # Jan 13 + 5 = Jan 18 — no real observation at Jan 18 (past end)
+        # -> NaN due to terminal-obs requirement.
+        row_jan13 = labels.loc[labels["date"] == pd.Timestamp("2025-01-13")]
+        assert row_jan13["fwd_5d"].isna().all(), (
+            "fwd_5d at Jan 13 should be NaN: no real observation at Jan 18"
+        )
+
+        # But: Jan 13 + (17-13) = verify a date where terminal IS real.
+        labels_2d = compute_forward_returns(ohlcv, "TEST", horizons=(1,))
+        row_jan13_2 = labels_2d.loc[labels_2d["date"] == pd.Timestamp("2025-01-13")]
+        expected = 201 / 200 - 1
+        actual = row_jan13_2["fwd_1d"].iloc[0]
         assert abs(actual - expected) < 1e-10, (
-            f"fwd_5d at Jan 1 should be {expected:.6f} (ffill from Jan 5), "
+            f"fwd_1d at Jan 13 should be {expected:.6f} (real obs at Jan 14), "
             f"got {actual:.6f}"
         )
 
-        # Jan 13 + 5 = Jan 18.  Jan 17 is 1 day before, within limit.
-        # ffilled close = 204.
-        row_jan13 = labels.loc[labels["date"] == pd.Timestamp("2025-01-13")]
-        expected_13 = 204 / 200 - 1
-        actual_13 = row_jan13["fwd_5d"].iloc[0]
-        assert abs(actual_13 - expected_13) < 1e-10
-
     def test_btc_excess_uses_same_calendar(self) -> None:
         """BTC-excess labels must reindex BTC to the same daily calendar
-        so both legs represent the same n-calendar-day horizon."""
+        so both legs represent the same n-calendar-day horizon. Both
+        legs require a real observation at the terminal date."""
+        # Use consecutive dates (no gaps) to avoid terminal-obs issues.
         dates = pd.to_datetime([
+            "2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04", "2025-01-05",
             "2025-01-06", "2025-01-07", "2025-01-08", "2025-01-09", "2025-01-10",
-            "2025-01-13", "2025-01-14", "2025-01-15", "2025-01-16", "2025-01-17",
         ])
         pair_close = [100, 102, 104, 103, 105, 108, 110, 112, 111, 113]
         btc_close_vals = [50000, 50500, 51000, 50800, 51200, 52000, 52500, 53000, 52800, 53200]
@@ -179,14 +187,12 @@ class TestComputeForwardReturns:
         labels = compute_forward_returns(
             ohlcv, "ETH-USD", horizons=(5,), btc_close=btc_series,
         )
-        # Jan 6 + 5 calendar days = Jan 11 (Sat).
-        # With ffill limit 3: Jan 10 (Fri) is 1 day before, within limit.
-        # So Jan 11 close = ffill from Jan 10 = 105 (pair), 51200 (BTC).
-        row = labels.loc[labels["date"] == pd.Timestamp("2025-01-06")]
+        # Jan 1 + 5 = Jan 6 (real observation exists for both pair and BTC).
+        row = labels.loc[labels["date"] == pd.Timestamp("2025-01-01")]
         fwd_raw = row["fwd_5d"].iloc[0]
         fwd_excess = row["fwd_5d_btc_excess"].iloc[0]
-        expected_raw = 105 / 100 - 1
-        expected_btc = 51200 / 50000 - 1
+        expected_raw = 108 / 100 - 1
+        expected_btc = 52000 / 50000 - 1
         assert abs(fwd_raw - expected_raw) < 1e-10
         assert abs(fwd_excess - (expected_raw - expected_btc)) < 1e-10
 
@@ -322,3 +328,87 @@ class TestBuildCryptoPanel:
         # Feature config digest present.
         assert "feature_config_digest" in manifest
         assert len(manifest["feature_config_digest"]) == 64
+
+        # PIT provenance: observation_end, label_available_at, watermarks, calendar digest.
+        assert "observation_end" in manifest
+        assert "label_available_at" in manifest
+        assert "input_bar_watermarks" in manifest
+        assert "calendar_identity_digest" in manifest
+        assert len(manifest["calendar_identity_digest"]) == 64
+        for slug in pairs:
+            assert slug in manifest["observation_end"]
+            assert slug in manifest["label_available_at"]
+            assert slug in manifest["input_bar_watermarks"]
+
+        # terminal_obs_required flag in label contract.
+        assert lc["terminal_obs_required"] is True
+
+
+class TestTerminalGapProtection:
+    def test_no_labels_after_last_real_observation(self) -> None:
+        """Labels must be NaN when the terminal observation date has no
+        real close.  At the end of the series, the last real observation
+        is Jan 10.  For horizon=5, labels at dates Jan 6+ need a real
+        observation at date+5 (Jan 11+), which doesn't exist, so must
+        be NaN."""
+        dates = pd.to_datetime([
+            "2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04",
+            "2025-01-05", "2025-01-06", "2025-01-07", "2025-01-08",
+            "2025-01-09", "2025-01-10",
+        ])
+        close = [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]
+        ohlcv = pd.DataFrame({
+            "open": close, "high": close, "low": close,
+            "close": close, "volume": [1e6] * len(close),
+        }, index=dates)
+
+        labels = compute_forward_returns(ohlcv, "TEST", horizons=(5,))
+
+        # Jan 6 + 5 = Jan 11 — no real observation at Jan 11 -> NaN.
+        for check_date in ["2025-01-06", "2025-01-07", "2025-01-08",
+                           "2025-01-09", "2025-01-10"]:
+            row = labels.loc[labels["date"] == pd.Timestamp(check_date)]
+            assert row["fwd_5d"].isna().all(), (
+                f"fwd_5d at {check_date} should be NaN: terminal date "
+                f"has no real observation"
+            )
+
+        # Jan 5 + 5 = Jan 10 — real observation exists -> valid label.
+        row_jan5 = labels.loc[labels["date"] == pd.Timestamp("2025-01-05")]
+        expected = 109 / 104 - 1
+        actual = row_jan5["fwd_5d"].iloc[0]
+        assert abs(actual - expected) < 1e-10, (
+            f"fwd_5d at Jan 5 should be {expected:.6f}, got {actual:.6f}"
+        )
+
+    def test_btc_excess_terminal_gap(self) -> None:
+        """BTC-excess labels must also be NaN when either the pair or BTC
+        terminal observation is missing."""
+        pair_dates = pd.to_datetime([
+            "2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04",
+            "2025-01-05", "2025-01-06", "2025-01-07",
+        ])
+        btc_dates = pd.to_datetime([
+            "2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04",
+            "2025-01-05",
+        ])
+        pair_close = [100, 101, 102, 103, 104, 105, 106]
+        btc_close = [50000, 50100, 50200, 50300, 50400]
+        ohlcv = pd.DataFrame({
+            "open": pair_close, "high": pair_close, "low": pair_close,
+            "close": pair_close, "volume": [1e6] * len(pair_close),
+        }, index=pair_dates)
+        btc_series = pd.Series(btc_close, index=btc_dates, name="btc_close")
+
+        labels = compute_forward_returns(
+            ohlcv, "ETH-USD", horizons=(5,), btc_close=btc_series,
+        )
+
+        # Jan 3 + 5 = Jan 8 — pair has no real obs at Jan 8 -> NaN.
+        row = labels.loc[labels["date"] == pd.Timestamp("2025-01-03")]
+        assert row["fwd_5d"].isna().all()
+        assert row["fwd_5d_btc_excess"].isna().all()
+
+        # Jan 1 + 5 = Jan 6 — BTC has no real obs at Jan 6 -> excess NaN.
+        row_jan1 = labels.loc[labels["date"] == pd.Timestamp("2025-01-01")]
+        assert row_jan1["fwd_5d_btc_excess"].isna().all()
