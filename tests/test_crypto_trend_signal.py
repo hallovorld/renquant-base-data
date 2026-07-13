@@ -1,4 +1,4 @@
-"""Tests for crypto SMA50 trend-following signal (G2 v3)."""
+"""Tests for crypto SMA feature computation (data-layer primitive)."""
 from __future__ import annotations
 
 from datetime import date
@@ -9,13 +9,10 @@ import pandas as pd
 import pytest
 
 from renquant_base_data.crypto_trend_signal import (
-    TrendSignalConfig,
-    PairSignal,
-    SignalSnapshot,
-    compute_signal_for_pair,
-    compute_signals,
-    _universe_hash,
-    _snapshot_digest,
+    SMAConfig,
+    PairSMA,
+    compute_sma_for_pair,
+    compute_sma_features,
     DEFAULT_SMA_PERIOD,
 )
 
@@ -44,190 +41,90 @@ def _populate_store(tmp_path: Path, pairs_data: dict[str, pd.Series]) -> Path:
     return store_dir
 
 
-class TestComputeSignalForPair:
-    def test_long_when_above_sma(self) -> None:
+class TestComputeSmaForPair:
+    def test_returns_close_and_sma(self) -> None:
         close = _make_close(100, drift=0.008, vol=0.01)
-        result = compute_signal_for_pair(close, sma_period=50)
+        result = compute_sma_for_pair(close, sma_period=50)
         assert result is not None
-        signal, last_close, sma = result
-        assert signal == 1
-        assert last_close > sma
-
-    def test_cash_when_below_sma(self) -> None:
-        close = _make_close(100, drift=-0.005, seed=99)
-        result = compute_signal_for_pair(close, sma_period=50)
-        assert result is not None
-        signal, last_close, sma = result
-        assert signal == 0
-        assert last_close <= sma
+        last_close, sma = result
+        assert isinstance(last_close, float)
+        assert isinstance(sma, float)
+        assert last_close > 0
+        assert sma > 0
 
     def test_insufficient_data(self) -> None:
         close = _make_close(30)
-        assert compute_signal_for_pair(close, sma_period=50) is None
+        assert compute_sma_for_pair(close, sma_period=50) is None
 
     def test_exact_minimum_bars(self) -> None:
         close = _make_close(50)
-        result = compute_signal_for_pair(close, sma_period=50)
+        result = compute_sma_for_pair(close, sma_period=50)
         assert result is not None
 
     def test_nan_close_returns_none(self) -> None:
         close = pd.Series([np.nan] * 60, index=pd.date_range("2025-01-01", periods=60))
-        assert compute_signal_for_pair(close, sma_period=50) is None
+        assert compute_sma_for_pair(close, sma_period=50) is None
 
 
-class TestComputeSignals:
-    def test_basic_signal_snapshot(self, tmp_path: Path) -> None:
+class TestComputeSmaFeatures:
+    def test_basic_features(self, tmp_path: Path) -> None:
         store_dir = _populate_store(tmp_path, {
             "BTC-USD": _make_close(200, drift=0.003, seed=1),
             "ETH-USD": _make_close(200, drift=-0.003, seed=2),
         })
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir)
-        snap = compute_signals(["BTC-USD", "ETH-USD"], cfg, as_of=date(2025, 7, 1))
+        cfg = SMAConfig(crypto_ohlcv_dir=store_dir)
+        features = compute_sma_features(["BTC-USD", "ETH-USD"], cfg, as_of=date(2025, 7, 1))
 
-        assert isinstance(snap, SignalSnapshot)
-        assert len(snap.signals) == 2
-        assert snap.n_long + snap.n_cash == 2
-        assert snap.digest.startswith("sha256:")
-        assert snap.universe_hash.startswith("sha256:")
+        assert len(features) == 2
+        for f in features:
+            assert isinstance(f, PairSMA)
+            assert f.close > 0
+            assert f.sma > 0
+            assert isinstance(f.bar_date, date)
 
     def test_missing_pair_skipped(self, tmp_path: Path) -> None:
         store_dir = _populate_store(tmp_path, {
             "BTC-USD": _make_close(200, seed=1),
         })
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir)
-        snap = compute_signals(["BTC-USD", "MISSING-USD"], cfg)
+        cfg = SMAConfig(crypto_ohlcv_dir=store_dir)
+        features = compute_sma_features(["BTC-USD", "MISSING-USD"], cfg)
 
-        assert len(snap.signals) == 1
-        assert snap.signals[0].pair == "BTC-USD"
+        assert len(features) == 1
+        assert features[0].pair == "BTC-USD"
 
     def test_insufficient_bars_skipped(self, tmp_path: Path) -> None:
         store_dir = _populate_store(tmp_path, {
             "BTC-USD": _make_close(30, seed=1),
         })
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir, min_bars=60)
-        snap = compute_signals(["BTC-USD"], cfg)
+        cfg = SMAConfig(crypto_ohlcv_dir=store_dir, min_bars=60)
+        features = compute_sma_features(["BTC-USD"], cfg)
 
-        assert len(snap.signals) == 0
-        assert snap.n_long == 0
-        assert snap.n_cash == 0
+        assert len(features) == 0
 
     def test_as_of_date_filters_bars(self, tmp_path: Path) -> None:
         close = _make_close(200, drift=0.003, seed=1)
         store_dir = _populate_store(tmp_path, {"BTC-USD": close})
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir, min_bars=60)
+        cfg = SMAConfig(crypto_ohlcv_dir=store_dir, min_bars=60)
 
-        snap = compute_signals(["BTC-USD"], cfg, as_of=date(2025, 3, 1))
-        assert len(snap.signals) == 1
-        assert snap.as_of_date == date(2025, 3, 1)
+        features = compute_sma_features(["BTC-USD"], cfg, as_of=date(2025, 3, 1))
+        assert len(features) == 1
 
-    def test_snapshot_to_dict(self, tmp_path: Path) -> None:
-        store_dir = _populate_store(tmp_path, {
-            "BTC-USD": _make_close(200, seed=1),
-        })
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir)
-        snap = compute_signals(["BTC-USD"], cfg)
-        d = snap.to_dict()
-
-        assert "as_of_date" in d
-        assert "signals" in d
-        assert len(d["signals"]) == 1
-        assert d["signals"][0]["pair"] == "BTC-USD"
-        assert d["signals"][0]["signal"] in (0, 1)
-        assert isinstance(d["signals"][0]["close"], float)
-        assert isinstance(d["signals"][0]["sma"], float)
-        assert d["digest"].startswith("sha256:")
-
-    def test_digest_deterministic(self, tmp_path: Path) -> None:
-        store_dir = _populate_store(tmp_path, {
-            "BTC-USD": _make_close(200, seed=1),
-            "ETH-USD": _make_close(200, seed=2),
-        })
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir)
-        snap1 = compute_signals(["BTC-USD", "ETH-USD"], cfg, as_of=date(2025, 7, 1))
-        snap2 = compute_signals(["BTC-USD", "ETH-USD"], cfg, as_of=date(2025, 7, 1))
-        assert snap1.digest == snap2.digest
-
-    def test_digest_changes_with_data(self, tmp_path: Path) -> None:
-        store_dir = _populate_store(tmp_path, {
-            "BTC-USD": _make_close(200, seed=1),
-        })
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir)
-        snap1 = compute_signals(["BTC-USD"], cfg, as_of=date(2025, 6, 1))
-        snap2 = compute_signals(["BTC-USD"], cfg, as_of=date(2025, 7, 1))
-        assert snap1.digest != snap2.digest
-
-    def test_pair_order_does_not_affect_digest(self, tmp_path: Path) -> None:
-        store_dir = _populate_store(tmp_path, {
-            "BTC-USD": _make_close(200, seed=1),
-            "ETH-USD": _make_close(200, seed=2),
-        })
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir)
-        snap1 = compute_signals(["BTC-USD", "ETH-USD"], cfg, as_of=date(2025, 7, 1))
-        snap2 = compute_signals(["ETH-USD", "BTC-USD"], cfg, as_of=date(2025, 7, 1))
-        assert snap1.digest == snap2.digest
-
-    def test_empty_universe(self, tmp_path: Path) -> None:
-        store_dir = tmp_path / "crypto_ohlcv"
-        store_dir.mkdir()
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir)
-        snap = compute_signals([], cfg)
-        assert len(snap.signals) == 0
-        assert snap.n_long == 0
-        assert snap.n_cash == 0
-
-
-class TestUniverseHash:
-    def test_deterministic(self) -> None:
-        h1 = _universe_hash(["BTC-USD", "ETH-USD"])
-        h2 = _universe_hash(["BTC-USD", "ETH-USD"])
-        assert h1 == h2
-
-    def test_order_independent(self) -> None:
-        h1 = _universe_hash(["ETH-USD", "BTC-USD"])
-        h2 = _universe_hash(["BTC-USD", "ETH-USD"])
-        assert h1 == h2
-
-    def test_different_sets(self) -> None:
-        h1 = _universe_hash(["BTC-USD"])
-        h2 = _universe_hash(["ETH-USD"])
-        assert h1 != h2
-
-
-class TestSignalIntegration:
-    def test_uptrend_detected(self, tmp_path: Path) -> None:
-        """Strong uptrend should produce LONG signal."""
-        close = _make_close(200, drift=0.005, vol=0.01, seed=42)
-        store_dir = _populate_store(tmp_path, {"BTC-USD": close})
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir)
-        snap = compute_signals(["BTC-USD"], cfg)
-
-        assert snap.n_long == 1
-        sig = snap.signals[0]
-        assert sig.signal == 1
-        assert sig.close > sig.sma
-
-    def test_downtrend_detected(self, tmp_path: Path) -> None:
-        """Strong downtrend should produce CASH signal."""
-        close = _make_close(200, drift=-0.005, vol=0.01, seed=42)
-        store_dir = _populate_store(tmp_path, {"BTC-USD": close})
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir)
-        snap = compute_signals(["BTC-USD"], cfg)
-
-        assert snap.n_cash == 1
-        sig = snap.signals[0]
-        assert sig.signal == 0
-        assert sig.close <= sig.sma
-
-    def test_multi_pair_mixed_signals(self, tmp_path: Path) -> None:
+    def test_multi_pair(self, tmp_path: Path) -> None:
         store_dir = _populate_store(tmp_path, {
             "BTC-USD": _make_close(200, drift=0.005, seed=1),
             "ETH-USD": _make_close(200, drift=-0.005, seed=2),
             "SOL-USD": _make_close(200, drift=0.003, seed=3),
         })
-        cfg = TrendSignalConfig(crypto_ohlcv_dir=store_dir)
-        snap = compute_signals(["BTC-USD", "ETH-USD", "SOL-USD"], cfg)
+        cfg = SMAConfig(crypto_ohlcv_dir=store_dir)
+        features = compute_sma_features(["BTC-USD", "ETH-USD", "SOL-USD"], cfg)
 
-        assert len(snap.signals) == 3
-        assert snap.n_long + snap.n_cash == 3
-        assert snap.n_long >= 1
-        assert snap.n_cash >= 1
+        assert len(features) == 3
+        pairs = {f.pair for f in features}
+        assert pairs == {"BTC-USD", "ETH-USD", "SOL-USD"}
+
+    def test_empty_universe(self, tmp_path: Path) -> None:
+        store_dir = tmp_path / "crypto_ohlcv"
+        store_dir.mkdir()
+        cfg = SMAConfig(crypto_ohlcv_dir=store_dir)
+        features = compute_sma_features([], cfg)
+        assert features == []
