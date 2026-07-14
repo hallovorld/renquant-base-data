@@ -41,13 +41,24 @@ Fix:
   `availability_rule`
 - `_load_ohlcv()`: retains `bar_close_utc` column if present in source data
 
+## bar_close_utc required + source-derived availability (codex r6)
+
+`bar_close_utc` is now REQUIRED in `_load_ohlcv()` — absent or misaligned
+(vs index + 1 day UTC daily convention) input raises ValueError.
+`compute_forward_returns()` derives `_available_after` from the actual
+`bar_close_utc` at the terminal date, not hardcoded arithmetic. BTC-excess
+availability uses `max(pair, BTC)` terminal close timestamp.
+`feature_available_after` in the panel is derived from source `bar_close_utc`.
+
+Manifest `label_contract` gains:
+- `bar_close_convention_validated: true`
+- `availability_derived_from: "bar_close_utc"`
+
 ## Tests
 
-27 tests pass (up from 24 — 3 new bar-close PIT regression tests):
-- `test_label_available_after_uses_bar_close_offset`: proves fwd_5d at Jan 1
-  has available_after = Jan 7 (D+5+1), not Jan 6
-- `test_btc_excess_available_after_bar_close_offset`: proves BTC-excess
-  available_after uses the same D+N+1 convention
-- `test_feature_available_after_in_panel`: proves feature_available_after =
-  date + 1 day for every row in the built panel
-- Prior tests updated for the +1 offset and new columns
+31 tests pass (up from 27 — 4 new bar_close_utc validation tests):
+- `test_missing_bar_close_utc_raises`: absent bar_close_utc → ValueError
+- `test_misaligned_bar_close_utc_raises`: wrong convention → ValueError
+- `test_valid_bar_close_utc_accepted`: correct convention accepted
+- `test_manifest_bar_close_validated`: manifest carries new fields
+- Prior tests updated with `bar_close_utc` column in all fixtures
