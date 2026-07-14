@@ -214,8 +214,9 @@ class TestBuildCryptoPanel:
 
         panel = pd.read_parquet(out)
         assert panel["pair"].nunique() == 3
-        feature_cols = [c for c in panel.columns if c not in ("pair", "date") and not c.startswith("fwd_")]
+        feature_cols = [c for c in panel.columns if c not in ("pair", "date", "feature_available_after") and not c.startswith("fwd_")]
         assert len(feature_cols) == EXPECTED_FEATURE_COUNT
+        assert "feature_available_after" in panel.columns
         assert "fwd_20d" in panel.columns
         assert "fwd_20d_btc_excess" in panel.columns
 
@@ -344,6 +345,9 @@ class TestBuildCryptoPanel:
         assert lc["terminal_obs_required"] is True
         assert lc["row_level_pit_fields"] is True
         assert lc["btc_start_obs_required"] is True
+        assert lc["bar_timestamp_convention"] == "UTC_daily_open"
+        assert lc["bar_close_offset_days"] == 1
+        assert "availability_rule" in lc
 
     def test_btc_benchmark_in_manifest_when_excluded_from_pairs(self, tmp_path: Path) -> None:
         """When pairs exclude BTC but btc_excess=True, BTC must appear in
@@ -396,11 +400,12 @@ class TestRowLevelPIT:
             assert labels.loc[nan_mask, avail_col].isna().all(), (
                 f"{avail_col} must be NaT where {col} is NaN"
             )
-            # Where label is valid, available_after is date + horizon.
+            # Where label is valid, available_after is date + horizon + 1
+            # (bar close offset: bar at date D closes at D+1).
             valid_mask = labels[col].notna()
             if valid_mask.any():
                 horizon_days = int(col.split("_")[1].rstrip("d"))
-                expected_dates = labels.loc[valid_mask, "date"] + pd.Timedelta(days=horizon_days)
+                expected_dates = labels.loc[valid_mask, "date"] + pd.Timedelta(days=horizon_days + 1)
                 actual_dates = labels.loc[valid_mask, avail_col]
                 pd.testing.assert_series_equal(
                     actual_dates.reset_index(drop=True),
@@ -540,4 +545,80 @@ class TestTerminalGapProtection:
         row_jan4 = labels.loc[labels["date"] == pd.Timestamp("2025-01-04")]
         assert row_jan4["fwd_5d_btc_excess"].notna().all(), (
             "BTC-excess at Jan 4 should be valid: both BTC start and terminal are real"
+        )
+
+
+class TestBarClosePIT:
+    def test_label_available_after_uses_bar_close_offset(self) -> None:
+        """Bar index is bar OPEN timestamp. Close[D] is known at D+1 00:00 UTC.
+        Label fwd_5d at date D uses close[D+5], available at D+6 (not D+5).
+        Feature at date D uses close[D], available at D+1."""
+        dates = pd.to_datetime([
+            "2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04",
+            "2025-01-05", "2025-01-06", "2025-01-07", "2025-01-08",
+            "2025-01-09", "2025-01-10",
+        ])
+        close = [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]
+        ohlcv = pd.DataFrame({
+            "open": close, "high": close, "low": close,
+            "close": close, "volume": [1e6] * len(close),
+        }, index=dates)
+
+        labels = compute_forward_returns(ohlcv, "TEST", horizons=(5,))
+
+        # Jan 1 + 5 = Jan 6 (terminal real). Available after Jan 7 (D+5+1).
+        row_jan1 = labels.loc[labels["date"] == pd.Timestamp("2025-01-01")]
+        assert row_jan1["fwd_5d"].notna().all()
+        avail = row_jan1["fwd_5d_available_after"].iloc[0]
+        assert avail == pd.Timestamp("2025-01-07"), (
+            f"fwd_5d at Jan 1 available_after should be Jan 7 (D+5+1), got {avail}"
+        )
+
+    def test_btc_excess_available_after_bar_close_offset(self) -> None:
+        """BTC-excess label at D with horizon N is available at D+N+1."""
+        dates = pd.to_datetime([
+            "2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04",
+            "2025-01-05", "2025-01-06", "2025-01-07", "2025-01-08",
+            "2025-01-09", "2025-01-10",
+        ])
+        pair_close = [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]
+        btc_close = [50000, 50100, 50200, 50300, 50400, 50500, 50600, 50700, 50800, 50900]
+        ohlcv = pd.DataFrame({
+            "open": pair_close, "high": pair_close, "low": pair_close,
+            "close": pair_close, "volume": [1e6] * len(pair_close),
+        }, index=dates)
+        btc_series = pd.Series(btc_close, index=dates, name="btc_close")
+
+        labels = compute_forward_returns(
+            ohlcv, "ETH-USD", horizons=(5,), btc_close=btc_series,
+        )
+
+        row_jan1 = labels.loc[labels["date"] == pd.Timestamp("2025-01-01")]
+        assert row_jan1["fwd_5d_btc_excess"].notna().all()
+        avail = row_jan1["fwd_5d_btc_excess_available_after"].iloc[0]
+        assert avail == pd.Timestamp("2025-01-07"), (
+            f"excess available_after should be Jan 7 (D+5+1), got {avail}"
+        )
+
+    def test_feature_available_after_in_panel(self, tmp_path: Path) -> None:
+        """Panel must include feature_available_after = date + 1 day
+        for every row (features use close[D], known at D+1)."""
+        pairs = ["BTC-USD", "ETH-USD"]
+        store_dir = _populate_store(tmp_path, pairs)
+        out = tmp_path / "panel.parquet"
+        cfg = CryptoPanelConfig(
+            crypto_ohlcv_dir=store_dir,
+            output_path=out,
+            min_panel_dates=50,
+            min_pairs=2,
+        )
+        build_crypto_panel(cfg)
+        panel = pd.read_parquet(out)
+
+        assert "feature_available_after" in panel.columns
+        expected = pd.to_datetime(panel["date"]) + pd.Timedelta(days=1)
+        pd.testing.assert_series_equal(
+            panel["feature_available_after"].reset_index(drop=True),
+            expected.reset_index(drop=True),
+            check_names=False,
         )

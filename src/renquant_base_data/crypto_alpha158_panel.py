@@ -73,7 +73,8 @@ def _load_ohlcv(store: CryptoLocalStore, slug: str) -> pd.DataFrame | None:
     if missing:
         log.warning("%s: missing OHLCV columns %s, skipping", slug, missing)
         return None
-    df = df[required].copy()
+    keep = required + [c for c in ["bar_close_utc"] if c in df.columns]
+    df = df[keep].copy()
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index)
     return df.sort_index()
@@ -145,7 +146,7 @@ def compute_forward_returns(
         terminal_has_real = real_obs.shift(-n).reindex(output_dates).fillna(False).infer_objects(copy=False)
         fwd_out = fwd.reindex(output_dates)
         fwd_out = fwd_out.where(terminal_has_real, other=np.nan)
-        terminal_date = pd.Series(output_dates + pd.Timedelta(days=n), index=output_dates)
+        terminal_date = pd.Series(output_dates + pd.Timedelta(days=n + 1), index=output_dates)
         rec[f"fwd_{n}d"] = fwd_out
         rec[f"fwd_{n}d_available_after"] = terminal_date.where(terminal_has_real, other=pd.NaT)
         if btc_cal is not None:
@@ -206,7 +207,7 @@ def build_crypto_panel(cfg: CryptoPanelConfig) -> Path:
         raise RuntimeError("No pairs produced alpha158 features")
 
     features_panel = pd.concat(feature_rows, ignore_index=True)
-    feature_cols = [c for c in features_panel.columns if c not in ("pair", "date")]
+    feature_cols = [c for c in features_panel.columns if c not in ("pair", "date", "feature_available_after")]
     if len(feature_cols) != EXPECTED_FEATURE_COUNT:
         raise RuntimeError(
             f"Crypto alpha158 feature count mismatch: {len(feature_cols)} != "
@@ -231,6 +232,8 @@ def build_crypto_panel(cfg: CryptoPanelConfig) -> Path:
         panel = features_panel.merge(labels_panel, on=["pair", "date"], how="inner")
     else:
         panel = features_panel
+
+    panel["feature_available_after"] = pd.to_datetime(panel["date"]) + pd.Timedelta(days=1)
 
     n_pairs = panel["pair"].nunique()
     n_dates = panel["date"].nunique()
@@ -316,6 +319,13 @@ def build_crypto_panel(cfg: CryptoPanelConfig) -> Path:
             "terminal_obs_required": True,
             "btc_start_obs_required": has_btc_excess,
             "row_level_pit_fields": True,
+            "bar_timestamp_convention": "UTC_daily_open",
+            "bar_close_offset_days": 1,
+            "availability_rule": (
+                "features at date D use close[D], available after D+1 "
+                "(bar close); labels fwd_Nd use close[D+N], available "
+                "after D+N+1 (terminal bar close)"
+            ),
         },
         "btc_excess": has_btc_excess,
     }

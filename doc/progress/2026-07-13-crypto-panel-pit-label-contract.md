@@ -28,12 +28,26 @@ terminal date to have a real observation.
 - `calendar_identity_digest`: SHA-256 of the UTC daily calendar parameters
 - `terminal_obs_required: true` in `label_contract`
 
+## Bar-close PIT timing (codex r5)
+
+Bar index = bar OPEN timestamp. Close[D] is known at D+1 00:00 UTC, not at D.
+`_available_after` columns were off by one: `date + N` should be `date + N + 1`
+because the terminal bar at D+N closes at D+N+1.
+
+Fix:
+- `compute_forward_returns()`: `_available_after = date + (N+1)` days
+- `build_crypto_panel()`: adds `feature_available_after = date + 1 day` column
+- Manifest `label_contract`: added `bar_timestamp_convention`, `bar_close_offset_days`,
+  `availability_rule`
+- `_load_ohlcv()`: retains `bar_close_utc` column if present in source data
+
 ## Tests
 
-20 tests pass (up from 18 — 2 new terminal-gap regression tests):
-- `test_no_labels_after_last_real_observation`: 10-day series, proves labels
-  are NaN when terminal date has no real observation, valid when it does
-- `test_btc_excess_terminal_gap`: proves BTC-excess labels are NaN when
-  either leg's terminal is missing
-- Existing gap-calendar and btc-calendar tests updated to reflect the
-  stricter terminal-obs requirement
+27 tests pass (up from 24 — 3 new bar-close PIT regression tests):
+- `test_label_available_after_uses_bar_close_offset`: proves fwd_5d at Jan 1
+  has available_after = Jan 7 (D+5+1), not Jan 6
+- `test_btc_excess_available_after_bar_close_offset`: proves BTC-excess
+  available_after uses the same D+N+1 convention
+- `test_feature_available_after_in_panel`: proves feature_available_after =
+  date + 1 day for every row in the built panel
+- Prior tests updated for the +1 offset and new columns
