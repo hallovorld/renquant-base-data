@@ -342,6 +342,83 @@ class TestBuildCryptoPanel:
 
         # terminal_obs_required flag in label contract.
         assert lc["terminal_obs_required"] is True
+        assert lc["row_level_pit_fields"] is True
+        assert lc["btc_start_obs_required"] is True
+
+    def test_btc_benchmark_in_manifest_when_excluded_from_pairs(self, tmp_path: Path) -> None:
+        """When pairs exclude BTC but btc_excess=True, BTC must appear in
+        input_bar_digests, input_bar_watermarks, and benchmark_inputs."""
+        pairs = ["BTC-USD", "ETH-USD", "SOL-USD"]
+        store_dir = _populate_store(tmp_path, pairs)
+        out = tmp_path / "panel.parquet"
+        cfg = CryptoPanelConfig(
+            crypto_ohlcv_dir=store_dir,
+            output_path=out,
+            pairs=["ETH/USD", "SOL/USD"],
+            btc_excess=True,
+            min_panel_dates=50,
+            min_pairs=2,
+        )
+        build_crypto_panel(cfg)
+        manifest = json.loads(out.with_suffix(".manifest.json").read_text())
+
+        assert BTC_SLUG in manifest["input_bar_digests"], (
+            "BTC must appear in input_bar_digests when btc_excess=True"
+        )
+        assert BTC_SLUG in manifest["input_bar_watermarks"], (
+            "BTC must appear in input_bar_watermarks when btc_excess=True"
+        )
+        assert "benchmark_inputs" in manifest
+        assert BTC_SLUG in manifest["benchmark_inputs"]
+        assert manifest["benchmark_inputs"][BTC_SLUG]["role"] == "excess_return_denominator"
+
+        # BTC should also appear in observation_end.
+        assert BTC_SLUG in manifest["observation_end"]
+
+        # Target pairs should NOT include BTC.
+        assert BTC_SLUG not in manifest["pairs"]
+
+
+class TestRowLevelPIT:
+    def test_available_after_columns_exist(self) -> None:
+        """Each label horizon must have a companion _available_after column
+        with the terminal observation date (NaT where label is NaN)."""
+        ohlcv = _make_ohlcv(n_days=100)
+        labels = compute_forward_returns(ohlcv, "TEST", horizons=(5, 20))
+
+        assert "fwd_5d_available_after" in labels.columns
+        assert "fwd_20d_available_after" in labels.columns
+
+        # Where label is NaN, available_after must be NaT.
+        for col in ["fwd_5d", "fwd_20d"]:
+            avail_col = f"{col}_available_after"
+            nan_mask = labels[col].isna()
+            assert labels.loc[nan_mask, avail_col].isna().all(), (
+                f"{avail_col} must be NaT where {col} is NaN"
+            )
+            # Where label is valid, available_after is date + horizon.
+            valid_mask = labels[col].notna()
+            if valid_mask.any():
+                horizon_days = int(col.split("_")[1].rstrip("d"))
+                expected_dates = labels.loc[valid_mask, "date"] + pd.Timedelta(days=horizon_days)
+                actual_dates = labels.loc[valid_mask, avail_col]
+                pd.testing.assert_series_equal(
+                    actual_dates.reset_index(drop=True),
+                    expected_dates.reset_index(drop=True),
+                    check_names=False,
+                )
+
+    def test_btc_excess_available_after(self) -> None:
+        """BTC-excess _available_after must be NaT where excess is NaN."""
+        ohlcv = _make_ohlcv(n_days=100, seed=1)
+        btc = _make_ohlcv(n_days=100, seed=2)
+        labels = compute_forward_returns(
+            ohlcv, "ETH-USD", horizons=(5,), btc_close=btc["close"],
+        )
+        assert "fwd_5d_btc_excess_available_after" in labels.columns
+
+        nan_mask = labels["fwd_5d_btc_excess"].isna()
+        assert labels.loc[nan_mask, "fwd_5d_btc_excess_available_after"].isna().all()
 
 
 class TestTerminalGapProtection:
@@ -412,3 +489,55 @@ class TestTerminalGapProtection:
         # Jan 1 + 5 = Jan 6 — BTC has no real obs at Jan 6 -> excess NaN.
         row_jan1 = labels.loc[labels["date"] == pd.Timestamp("2025-01-01")]
         assert row_jan1["fwd_5d_btc_excess"].isna().all()
+
+    def test_btc_start_missing_nullifies_excess(self) -> None:
+        """BTC-excess labels must be NaN when BTC has no real observation
+        at the pair's start date, even if both endpoints are real.
+
+        Pair has daily data Jan 1-10. BTC has data Jan 1, Jan 4-10
+        (missing Jan 2-3, within 3-day ffill tolerance).  At pair date
+        Jan 2, BTC(t=Jan 2) is forward-filled from Jan 1, but pair(t=Jan 2)
+        is real.  The BTC leg would measure [btc(Jan 1), btc(Jan 7)]
+        instead of [btc(Jan 2), btc(Jan 7)] — different effective horizon.
+        The excess label must be NaN."""
+        pair_dates = pd.to_datetime([
+            "2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04",
+            "2025-01-05", "2025-01-06", "2025-01-07", "2025-01-08",
+            "2025-01-09", "2025-01-10",
+        ])
+        # BTC missing Jan 2-3 (within 3-day ffill limit).
+        btc_dates = pd.to_datetime([
+            "2025-01-01", "2025-01-04", "2025-01-05", "2025-01-06",
+            "2025-01-07", "2025-01-08", "2025-01-09", "2025-01-10",
+        ])
+        pair_close = [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]
+        btc_close = [50000, 50300, 50400, 50500, 50600, 50700, 50800, 50900]
+        ohlcv = pd.DataFrame({
+            "open": pair_close, "high": pair_close, "low": pair_close,
+            "close": pair_close, "volume": [1e6] * len(pair_close),
+        }, index=pair_dates)
+        btc_series = pd.Series(btc_close, index=btc_dates, name="btc_close")
+
+        labels = compute_forward_returns(
+            ohlcv, "ETH-USD", horizons=(5,), btc_close=btc_series,
+        )
+
+        # Jan 2: pair(t) real, BTC(t=Jan 2) is ffilled from Jan 1 -> excess NaN.
+        row_jan2 = labels.loc[labels["date"] == pd.Timestamp("2025-01-02")]
+        assert row_jan2["fwd_5d"].notna().all(), "raw fwd should be valid"
+        assert row_jan2["fwd_5d_btc_excess"].isna().all(), (
+            "BTC-excess at Jan 2 must be NaN: BTC start is forward-filled, "
+            "not a real observation"
+        )
+
+        # Jan 1: BTC(t=Jan 1) is real, BTC terminal Jan 6 is real -> valid.
+        row_jan1 = labels.loc[labels["date"] == pd.Timestamp("2025-01-01")]
+        assert row_jan1["fwd_5d_btc_excess"].notna().all(), (
+            "BTC-excess at Jan 1 should be valid: both BTC start and terminal are real"
+        )
+
+        # Jan 4: BTC(t=Jan 4) is real, BTC terminal Jan 9 is real -> valid.
+        row_jan4 = labels.loc[labels["date"] == pd.Timestamp("2025-01-04")]
+        assert row_jan4["fwd_5d_btc_excess"].notna().all(), (
+            "BTC-excess at Jan 4 should be valid: both BTC start and terminal are real"
+        )

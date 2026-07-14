@@ -132,22 +132,30 @@ def compute_forward_returns(
         "pair": pd.Series(slug, index=output_dates),
         "date": pd.Series(output_dates, index=output_dates),
     }
+    if btc_close is not None:
+        btc_sorted = btc_close.sort_index()
+        btc_cal = btc_sorted.reindex(cal, method="ffill", limit=FFILL_LIMIT_DAYS)
+        btc_real = btc_sorted.reindex(cal).notna()
+        btc_start_has_real = btc_real.reindex(output_dates).fillna(False).infer_objects(copy=False)
+    else:
+        btc_cal = btc_real = btc_start_has_real = None
+
     for n in horizons:
         fwd = c_cal.shift(-n) / c_cal - 1
         terminal_has_real = real_obs.shift(-n).reindex(output_dates).fillna(False).infer_objects(copy=False)
         fwd_out = fwd.reindex(output_dates)
         fwd_out = fwd_out.where(terminal_has_real, other=np.nan)
+        terminal_date = pd.Series(output_dates + pd.Timedelta(days=n), index=output_dates)
         rec[f"fwd_{n}d"] = fwd_out
-        if btc_close is not None:
-            btc_cal = btc_close.sort_index().reindex(
-                cal, method="ffill", limit=FFILL_LIMIT_DAYS,
-            )
-            btc_real = btc_close.sort_index().reindex(cal).notna()
+        rec[f"fwd_{n}d_available_after"] = terminal_date.where(terminal_has_real, other=pd.NaT)
+        if btc_cal is not None:
             fwd_btc = btc_cal.shift(-n) / btc_cal - 1
             btc_terminal_has_real = btc_real.shift(-n).reindex(output_dates).fillna(False).infer_objects(copy=False)
+            excess_valid = terminal_has_real & btc_terminal_has_real & btc_start_has_real
             excess = fwd_out - fwd_btc.reindex(output_dates)
-            excess = excess.where(terminal_has_real & btc_terminal_has_real, other=np.nan)
+            excess = excess.where(excess_valid, other=np.nan)
             rec[f"fwd_{n}d_btc_excess"] = excess
+            rec[f"fwd_{n}d_btc_excess_available_after"] = terminal_date.where(excess_valid, other=pd.NaT)
     return pd.DataFrame(rec)
 
 
@@ -290,7 +298,7 @@ def build_crypto_panel(cfg: CryptoPanelConfig) -> Path:
         "n_rows": len(panel),
         "n_features": len(feature_cols),
         "feature_cols": feature_cols,
-        "label_cols": [c for c in panel.columns if c.startswith("fwd_")],
+        "label_cols": [c for c in panel.columns if c.startswith("fwd_") and not c.endswith("_available_after")],
         "pairs": sorted(panel["pair"].unique().tolist()),
         "date_range": [cal_start, cal_end],
         "parquet_sha256": parquet_sha256,
@@ -306,9 +314,22 @@ def build_crypto_panel(cfg: CryptoPanelConfig) -> Path:
             "ffill_limit_days": FFILL_LIMIT_DAYS,
             "btc_excess": has_btc_excess,
             "terminal_obs_required": True,
+            "btc_start_obs_required": has_btc_excess,
+            "row_level_pit_fields": True,
         },
         "btc_excess": has_btc_excess,
     }
+
+    if has_btc_excess:
+        btc_bar_path = store_dir / BTC_SLUG / "1d.parquet"
+        if btc_bar_path.exists() and BTC_SLUG not in input_bar_digests:
+            input_bar_digests[BTC_SLUG] = hashlib.sha256(btc_bar_path.read_bytes()).hexdigest()
+        if btc_close is not None and BTC_SLUG not in input_bar_watermarks:
+            input_bar_watermarks[BTC_SLUG] = str(btc_close.index.max().date())
+        btc_ohlcv_for_manifest = _load_ohlcv(store, BTC_SLUG)
+        if btc_ohlcv_for_manifest is not None and BTC_SLUG not in observation_end:
+            observation_end[BTC_SLUG] = str(btc_ohlcv_for_manifest.index.max().date())
+        manifest["benchmark_inputs"] = {BTC_SLUG: {"role": "excess_return_denominator"}}
     manifest_path = out_path.with_suffix(".manifest.json")
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
