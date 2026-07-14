@@ -32,7 +32,8 @@ def _make_ohlcv(n_days: int = 200, start: str = "2025-01-01", seed: int = 42) ->
     opening = close * (1 + rng.normal(0, 0.01, n_days))
     volume = rng.uniform(1e6, 1e8, n_days)
     df = pd.DataFrame(
-        {"open": opening, "high": high, "low": low, "close": close, "volume": volume},
+        {"open": opening, "high": high, "low": low, "close": close, "volume": volume,
+         "bar_close_utc": dates + pd.Timedelta(days=1)},
         index=dates,
     )
     df.index.name = "timestamp"
@@ -132,6 +133,7 @@ class TestComputeForwardReturns:
         ohlcv = pd.DataFrame({
             "open": close, "high": close, "low": close,
             "close": close, "volume": [1e6] * len(close),
+            "bar_close_utc": dates + pd.Timedelta(days=1),
         }, index=dates)
 
         labels = compute_forward_returns(ohlcv, "TEST", horizons=(5,))
@@ -182,6 +184,7 @@ class TestComputeForwardReturns:
         ohlcv = pd.DataFrame({
             "open": pair_close, "high": pair_close, "low": pair_close,
             "close": pair_close, "volume": [1e6] * len(dates),
+            "bar_close_utc": dates + pd.Timedelta(days=1),
         }, index=dates)
         btc_series = pd.Series(btc_close_vals, index=dates, name="btc_close")
         labels = compute_forward_returns(
@@ -442,6 +445,7 @@ class TestTerminalGapProtection:
         ohlcv = pd.DataFrame({
             "open": close, "high": close, "low": close,
             "close": close, "volume": [1e6] * len(close),
+            "bar_close_utc": dates + pd.Timedelta(days=1),
         }, index=dates)
 
         labels = compute_forward_returns(ohlcv, "TEST", horizons=(5,))
@@ -479,6 +483,7 @@ class TestTerminalGapProtection:
         ohlcv = pd.DataFrame({
             "open": pair_close, "high": pair_close, "low": pair_close,
             "close": pair_close, "volume": [1e6] * len(pair_close),
+            "bar_close_utc": pair_dates + pd.Timedelta(days=1),
         }, index=pair_dates)
         btc_series = pd.Series(btc_close, index=btc_dates, name="btc_close")
 
@@ -520,6 +525,7 @@ class TestTerminalGapProtection:
         ohlcv = pd.DataFrame({
             "open": pair_close, "high": pair_close, "low": pair_close,
             "close": pair_close, "volume": [1e6] * len(pair_close),
+            "bar_close_utc": pair_dates + pd.Timedelta(days=1),
         }, index=pair_dates)
         btc_series = pd.Series(btc_close, index=btc_dates, name="btc_close")
 
@@ -562,6 +568,7 @@ class TestBarClosePIT:
         ohlcv = pd.DataFrame({
             "open": close, "high": close, "low": close,
             "close": close, "volume": [1e6] * len(close),
+            "bar_close_utc": dates + pd.Timedelta(days=1),
         }, index=dates)
 
         labels = compute_forward_returns(ohlcv, "TEST", horizons=(5,))
@@ -586,6 +593,7 @@ class TestBarClosePIT:
         ohlcv = pd.DataFrame({
             "open": pair_close, "high": pair_close, "low": pair_close,
             "close": pair_close, "volume": [1e6] * len(pair_close),
+            "bar_close_utc": dates + pd.Timedelta(days=1),
         }, index=dates)
         btc_series = pd.Series(btc_close, index=dates, name="btc_close")
 
@@ -622,3 +630,80 @@ class TestBarClosePIT:
             expected.reset_index(drop=True),
             check_names=False,
         )
+
+
+class TestBarCloseValidation:
+    def test_missing_bar_close_utc_raises(self, tmp_path: Path) -> None:
+        """_load_ohlcv must raise ValueError if bar_close_utc is absent."""
+        from renquant_base_data.crypto_alpha158_panel import _load_ohlcv
+
+        store_dir = tmp_path / "crypto_ohlcv"
+        pair_dir = store_dir / "TEST-USD"
+        pair_dir.mkdir(parents=True)
+        dates = pd.date_range("2025-01-01", periods=10, freq="D")
+        df = pd.DataFrame({
+            "open": range(10), "high": range(10), "low": range(10),
+            "close": range(10), "volume": [1e6] * 10,
+        }, index=dates)
+        df.to_parquet(pair_dir / "1d.parquet")
+
+        store = CryptoLocalStore(store_dir)
+        with pytest.raises(ValueError, match="bar_close_utc.*required"):
+            _load_ohlcv(store, "TEST-USD")
+
+    def test_misaligned_bar_close_utc_raises(self, tmp_path: Path) -> None:
+        """_load_ohlcv must raise ValueError if bar_close_utc != index + 1 day."""
+        from renquant_base_data.crypto_alpha158_panel import _load_ohlcv
+
+        store_dir = tmp_path / "crypto_ohlcv"
+        pair_dir = store_dir / "TEST-USD"
+        pair_dir.mkdir(parents=True)
+        dates = pd.date_range("2025-01-01", periods=10, freq="D")
+        df = pd.DataFrame({
+            "open": range(10), "high": range(10), "low": range(10),
+            "close": range(10), "volume": [1e6] * 10,
+            "bar_close_utc": dates + pd.Timedelta(days=2),
+        }, index=dates)
+        df.to_parquet(pair_dir / "1d.parquet")
+
+        store = CryptoLocalStore(store_dir)
+        with pytest.raises(ValueError, match="does not match UTC daily convention"):
+            _load_ohlcv(store, "TEST-USD")
+
+    def test_valid_bar_close_utc_accepted(self, tmp_path: Path) -> None:
+        """_load_ohlcv must accept bar_close_utc == index + 1 day."""
+        from renquant_base_data.crypto_alpha158_panel import _load_ohlcv
+
+        store_dir = tmp_path / "crypto_ohlcv"
+        pair_dir = store_dir / "TEST-USD"
+        pair_dir.mkdir(parents=True)
+        dates = pd.date_range("2025-01-01", periods=10, freq="D")
+        df = pd.DataFrame({
+            "open": range(10), "high": range(10), "low": range(10),
+            "close": range(10), "volume": [1e6] * 10,
+            "bar_close_utc": dates + pd.Timedelta(days=1),
+        }, index=dates)
+        df.to_parquet(pair_dir / "1d.parquet")
+
+        store = CryptoLocalStore(store_dir)
+        result = _load_ohlcv(store, "TEST-USD")
+        assert result is not None
+        assert "bar_close_utc" in result.columns
+
+    def test_manifest_bar_close_validated(self, tmp_path: Path) -> None:
+        """Manifest must carry bar_close_convention_validated and
+        availability_derived_from fields."""
+        pairs = ["BTC-USD", "ETH-USD"]
+        store_dir = _populate_store(tmp_path, pairs)
+        out = tmp_path / "panel.parquet"
+        cfg = CryptoPanelConfig(
+            crypto_ohlcv_dir=store_dir,
+            output_path=out,
+            min_panel_dates=50,
+            min_pairs=2,
+        )
+        build_crypto_panel(cfg)
+        manifest = json.loads(out.with_suffix(".manifest.json").read_text())
+        lc = manifest["label_contract"]
+        assert lc["bar_close_convention_validated"] is True
+        assert lc["availability_derived_from"] == "bar_close_utc"
