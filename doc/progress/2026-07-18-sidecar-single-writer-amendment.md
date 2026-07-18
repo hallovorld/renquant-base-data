@@ -14,7 +14,9 @@ scorer) name the sentiment columns.
 
 Amended resolution: one file one writer — base-data builder becomes the
 sole producer with a 179-col sentiment-carrying contract; σ-head refresh
-stops writing (consumes or derives its view, AC-B'); extension-row
+stops writing and consumes the canonical file directly (frozen r2 —
+viable because extension rows are DROPPED per §2.3; AC-B' now pins
+zero extension rows in the canonical output); extension-row
 disposition frozen by consumer evidence; guard passes by construction.
 ACs: writer cessation, σ-head fit equivalence, Saturday-chain dry run,
 migration integrity inherited verbatim, signature closure.
