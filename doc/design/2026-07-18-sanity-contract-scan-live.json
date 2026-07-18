@@ -1,0 +1,1251 @@
+{
+  "sentiment_cols": [
+    "mean_sentiment",
+    "n_articles_log",
+    "sentiment_pos_share"
+  ],
+  "n_scanned": 292,
+  "n_contracts": 149,
+  "n_no_feature_cols": 138,
+  "n_manifests": 5,
+  "violations": {
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.pre-v1-restamp-20260715T212457Z.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.previous.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_20260706T230931Z.staging.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_20260712T170005Z.staging.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_20260713T201007Z.staging.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_20260718T110005Z.staging.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-06.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-09.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-10.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-11.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-12.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-13.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-16.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-17.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-18.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/shadow/panel-ltr.alpha158_fund.shadow.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2023-10-02/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2023-10-23/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2023-11-13/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2023-12-04/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2023-12-25/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-01-15/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-02-05/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-02-26/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-03-18/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-04-08/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-04-29/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-05-20/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-06-10/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-07-01/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-07-22/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-08-12/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-09-02/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-09-23/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-10-14/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-11-04/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-11-25/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-12-16/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-01-06/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-01-27/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-02-17/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-03-10/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-03-31/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-04-21/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-05-12/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-06-02/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-06-23/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-07-14/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-08-04/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-08-25/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-09-15/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-10-06/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-10-27/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-11-17/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-12-08/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-12-29/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2026-01-19/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2026-02-09/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2026-03-02/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-01-01/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-01-22/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-02-12/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-03-04/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-03-25/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-04-15/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-05-06/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-05-27/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-06-17/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-07-08/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-07-29/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-08-19/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-09-09/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-09-30/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-10-21/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-11-11/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-12-02/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-12-23/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-01-13/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-02-03/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-02-24/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-03-17/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-04-07/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-04-28/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-05-19/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-06-09/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-06-30/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-07-21/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-08-11/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-09-01/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-09-22/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-10-13/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-11-03/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-11-24/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-12-15/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2026-01-05/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2026-01-26/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2026-02-16/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    },
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2026-03-09/panel-ltr.json": {
+      "status": "contract",
+      "n_feature_cols": 172,
+      "sentiment_named": [
+        "mean_sentiment",
+        "n_articles_log",
+        "sentiment_pos_share"
+      ],
+      "dataset_recorded": false,
+      "label_col": "fwd_60d_excess"
+    }
+  },
+  "n_violations": 99,
+  "sidecar_exposed_violations": [
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.pre-v1-restamp-20260715T212457Z.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.previous.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_20260706T230931Z.staging.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_20260712T170005Z.staging.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_20260713T201007Z.staging.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_20260718T110005Z.staging.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-06.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-09.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-10.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-11.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-12.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-13.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-16.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-17.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/prod/panel-ltr.alpha158_fund.weekly_rollback_2026-07-18.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/shadow/panel-ltr.alpha158_fund.shadow.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2023-10-02/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2023-10-23/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2023-11-13/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2023-12-04/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2023-12-25/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-01-15/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-02-05/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-02-26/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-03-18/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-04-08/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-04-29/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-05-20/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-06-10/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-07-01/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-07-22/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-08-12/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-09-02/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-09-23/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-10-14/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-11-04/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-11-25/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2024-12-16/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-01-06/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-01-27/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-02-17/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-03-10/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-03-31/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-04-21/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-05-12/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-06-02/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-06-23/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-07-14/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-08-04/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-08-25/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-09-15/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-10-06/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-10-27/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-11-17/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-12-08/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2025-12-29/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2026-01-19/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2026-02-09/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_gbdt_prod_recipe_v2/2026-03-02/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-01-01/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-01-22/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-02-12/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-03-04/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-03-25/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-04-15/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-05-06/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-05-27/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-06-17/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-07-08/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-07-29/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-08-19/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-09-09/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-09-30/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-10-21/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-11-11/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-12-02/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2024-12-23/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-01-13/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-02-03/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-02-24/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-03-17/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-04-07/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-04-28/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-05-19/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-06-09/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-06-30/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-07-21/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-08-11/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-09-01/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-09-22/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-10-13/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-11-03/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-11-24/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2025-12-15/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2026-01-05/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2026-01-26/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2026-02-16/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_v2_20260602/2026-03-09/panel-ltr.json"
+  ],
+  "unparseable": [],
+  "unresolved_manifest_entries": [
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2023-10-02/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2023-10-23/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2023-11-13/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2023-12-04/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2023-12-25/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-01-15/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-02-05/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-02-26/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-03-18/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-04-08/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-04-29/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-05-20/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-06-10/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-07-01/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-07-22/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-08-12/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-09-02/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-09-23/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-10-14/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-11-04/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-11-25/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2024-12-16/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-01-06/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-01-27/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-02-17/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-03-10/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-03-31/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-04-21/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-05-12/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-06-02/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-06-23/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-07-14/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-08-04/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-08-25/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-09-15/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-10-06/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-10-27/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-11-17/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-12-08/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2025-12-29/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2026-01-19/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2026-02-09/panel-ltr.json",
+    "/Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/sim/walkforward_manifest_gbdt_prod_recipe_calibrated.json: no metadata surface for /Users/renhao/git/github/RenQuant/backtesting/renquant_104/artifacts/walkforward_172_sentiment/2026-03-02/panel-ltr.json"
+  ],
+  "precondition_holds": false
+}
