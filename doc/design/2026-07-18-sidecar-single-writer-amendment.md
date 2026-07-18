@@ -41,10 +41,10 @@ resolving it by data migration alone is treating the symptom.
 
 1. **Single canonical writer.** `renquant_base_data.rawlabel_sidecar`
    becomes the SOLE producer of the served sidecar. The orchestrator
-   σ-head refresh STOPS writing the file: it either consumes the
-   canonical file directly or derives its fit view in memory / to its
-   OWN artifact (decided by AC-B'). Its column-contract-blind validator
-   is retired in favor of the canonical guard.
+   σ-head refresh STOPS writing the file and CONSUMES the canonical
+   file directly (r2 — viable now that §2.3 drops extension rows, the
+   sole feature its validator rejected). Its column-contract-blind
+   validator is retired in favor of the canonical guard.
 2. **Canonical contract carries sentiment (option (a)-variant,
    evidence-forced).** `SENTIMENT_COLS` is un-frozen: the contract =
    panel schema INCLUDING the three sentiment columns + raw fwd60d
@@ -52,20 +52,22 @@ resolving it by data migration alone is treating the symptom.
    (the 99 contracts) requires; the wf_gate direct path is preserved
    and no merge-path flip ever occurs. The builder docstring's "the
    served sidecar predates them" is deleted as factually obsolete.
-3. **Extension-row disposition = AC-B' (open, resolved in this
-   amendment's review).** The base-data recipe adds bar-frontier
-   extension rows; the σ-head recipe rejects them. AC-B' determines
-   from the AC-1 inventory which consumers actually require extension
-   rows in THIS file: if none (calibrator fitters read labeled rows;
-   wf_gate reads model feat_cols on eval dates), the canonical
-   contract DROPS them (simplest σ-head compatibility); if any does,
-   the σ-head fit path must tolerate-or-filter them (tested). Either
-   way the choice is frozen in the contract, not left to per-writer
-   behavior.
-4. **Sentiment for any retained unlabeled/extension rows = NaN, never
-   ffill** (event-driven features; ffill would fabricate staleness as
-   signal; the XGB runtime zeroing path handles NaN by design —
-   compatibility test required).
+3. **Extension-row disposition — FROZEN: the canonical contract
+   DROPS bar-frontier extension rows (r2, review-adjudicated).** The
+   AC-1 inventory shows NO consumer of THIS file requires them
+   (calibrator fitters read labeled rows; wf_gate reads model
+   feat_cols on eval dates), the σ-head validator rejects them, and
+   today's served file carries none — dropping them is ZERO behavior
+   change for every inventoried consumer and removes the last recipe
+   divergence between the two former writers. The builder's
+   `extend_to_bar_frontier` default flips off for THIS artifact; any
+   future consumer needing a bar-frontier view gets its OWN artifact,
+   never a recipe fork of this one.
+4. **Sentiment for unlabeled tail rows (dates whose fwd60d label is
+   not yet realized) = whatever the panel carries; any MISSING
+   sentiment value = NaN, never ffill** (event-driven features; ffill
+   would fabricate staleness as signal; the XGB runtime zeroing path
+   handles NaN by design — compatibility test required).
 5. **Guard passes by construction** thereafter: builder contract ==
    served file, single writer, no drift source. The guard itself stays
    unchanged (fail-closed direction preserved).
@@ -77,15 +79,25 @@ resolving it by data migration alone is treating the symptom.
   builder — proven by the AC-1 sweep re-run showing exactly one writer,
   plus a σ-head-path test asserting it no longer opens the file for
   write.
-- AC-B (σ-head fit equivalence): the σ-head fit consuming the canonical
-  file (or its derived view) produces results equivalent to its
-  self-built input on the same data (tolerance-tested) — the refresh's
-  OUTPUT (NGBoost σ artifacts) must not silently change.
-- AC-B' (extension rows): consumer-evidence-based disposition frozen in
-  the contract (see §2.3), with a test pinning whichever is chosen.
-- AC-C (deadlock closure): a full dry-run of the Saturday chain
-  (refresh → guard → non-promoting retrain preparation, per the base
-  RFC's AC-3) passes end-to-end against the unified contract.
+- AC-B (σ-head fit equivalence, r2 — population and tolerance frozen
+  now that the row domain is closed): over the IDENTICAL labeled-row
+  population (canonical file rows == the σ-head's former self-built
+  rows, proven by row-set digest equality), the fit output artifacts
+  are BYTE-IDENTICAL under fixed seeds; if any nondeterminism source
+  is documented (library/BLAS), the fallback tolerance is per-parameter
+  relative diff ≤ 1e-9 with the source named. Anything looser fails
+  AC-B.
+- AC-B' (extension rows): FROZEN as DROPPED per §2.3; a contract test
+  pins that the canonical output contains zero bar-frontier extension
+  rows.
+- AC-C (deadlock closure, r2 strengthened): a full dry-run of the
+  Saturday chain (refresh → guard → non-promoting retrain preparation,
+  per the base RFC's AC-3) passes end-to-end against the unified
+  contract, WITH a served-file digest watch across the whole chain —
+  the digest may change only at the canonical builder's swap step;
+  any other mutation (e.g. the dormant `build_raw_fwd60d_label.py`
+  or an unswept writer) fails the dry run. This covers writers
+  invisible to AC-A's runtime assertions.
 - AC-D (migration integrity): the one supervised regeneration to the
   canonical contract inherits the base RFC's AC-2 verbatim (before/
   after digests, retained-column checksum, hash-verified rollback) —
