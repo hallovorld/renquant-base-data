@@ -174,5 +174,8 @@
  "sue_signal",
  "surprise_momentum",
  "surprise_streak",
+ "sentiment_pos_share",
+ "mean_sentiment",
+ "n_articles_log",
  "fwd_60d_excess_raw"
 ]
