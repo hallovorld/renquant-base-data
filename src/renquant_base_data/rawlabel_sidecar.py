@@ -9,37 +9,50 @@ refresh mechanism, so its ``max(date)`` froze at the 2026-02-11 panel vintage
 while the transformer panel gained a committed recipe + weekly refresh (S12 B1:
 ``transformer_corpus`` here + RenQuant ``scripts/refresh_transformer_corpus.py``).
 The promote gate holds the rawlabel source to the raw 28-day fast-axis SLA
-because a healthy rawlabel KEEPS unlabeled rows — its ``max(date)`` is the BAR
-frontier, not the label-clipped training frontier.
+because a healthy rawlabel KEEPS unlabeled rows — its ``max(date)`` tracks the
+panel's weekly-refreshed feature frontier, not a frozen vintage (nor the
+label-clipped training frontier; the raw sidecar never label-dropnas). The
+default no longer extends past the panel frontier — see the amendment below.
 
-THE RECIPE (mirrors the original Track A derivation, committed + deterministic):
+SINGLE-WRITER AMENDMENT (base-data#48, 2026-07-18): this builder is now the
+SOLE writer of the served sidecar. The canonical contract CARRIES the three
+sentiment columns (179 cols) and, for THIS artifact, drops the bar-frontier
+axis extension — the two former recipe divergences between this builder and
+the orchestrator σ-head writer that produced the weekly deadlock. See
+``doc/design/2026-07-18-sidecar-single-writer-amendment.md`` §2.
+
+THE RECIPE (committed + deterministic):
 
   1. take the daily-refreshed production fund panel
      (``alpha158_291_fundamental_dataset.parquet``, the committed
      ``alpha158_fund_panel`` output) over its FULL ticker universe — no
      watchlist subset, NO forward-label dropna (raw-sidecar semantics);
-  2. drop the panel's sentiment columns (the served sidecar predates them and
-     its consumers — the calibrator fits — never read them);
-  3. EXTEND each ticker's (ticker, date) axis past the panel's label-clipped
-     frontier with that ticker's own OHLCV bar dates, so ``max(date)`` reaches
-     the bar frontier; extension rows carry NaN features / NaN split_label
-     (honestly not computed — no fabricated values);
+  2. carry the panel's full column schema THROUGH — sentiment columns
+     INCLUDED (amendment §2.2: the sentiment columns are ACTIVE features of
+     the prod XGB recipe and both GBDT WF corpora, not vestigial). Missing
+     sentiment values stay NaN, never forward-filled (amendment §2.4:
+     event-driven features; a ffill would fabricate staleness as signal);
+  3. by DEFAULT do NOT extend each ticker's (ticker, date) axis past the panel
+     frontier (amendment §2.3: no consumer of the served file needs
+     bar-frontier rows and the σ-head validator rejected them; the served
+     file carries none). ``extend_to_bar_frontier=True`` remains available for
+     a SEPARATE artifact; when set, extension rows carry NaN features / NaN
+     split_label (honestly not computed — no fabricated values);
   4. compute ``fwd_60d_excess_raw`` point-in-time from OHLCV closes exactly as
      the original build: per ticker, ``close[d+60td]/close[d] - 1`` minus the
      same-window benchmark (SPY) return. A label for date ``d`` is knowable
      only once ``d+60td`` has traded; rows whose forward window is incomplete
      stay NaN (the calibrator fits dropna on the label);
-  5. keep the EXACT served 176-column schema — column set, order, dtypes —
+  5. keep the EXACT served 179-column schema — column set, order, dtypes —
      and emit deterministic (ticker, date) row ordering.
 
-FAIL-CLOSED CONTRACT: a fund panel missing contract columns, carrying
-unexpected extra columns (strict default; the sentiment columns are the one
-known-droppable set), duplicate (ticker, date) rows, a missing/corrupt
-benchmark OHLCV cache, future-dated bars or panel rows, or an all-NaN raw
-label (broken OHLCV dir) all raise ``RawLabelSidecarError`` — the builder
-never silently emits a divergent or vacuous sidecar. The builder writes ONLY
-to the caller-specified output path; it never defaults to (or touches) a
-served production file.
+FAIL-CLOSED CONTRACT: a fund panel missing contract columns (sentiment now
+included), carrying unexpected extra columns (strict default), duplicate
+(ticker, date) rows, a missing/corrupt benchmark OHLCV cache, future-dated
+bars or panel rows, or an all-NaN raw label (broken OHLCV dir) all raise
+``RawLabelSidecarError`` — the builder never silently emits a divergent or
+vacuous sidecar. The builder writes ONLY to the caller-specified output path;
+it never defaults to (or touches) a served production file.
 """
 from __future__ import annotations
 
@@ -69,17 +82,18 @@ DEFAULT_HORIZON_TRADING_DAYS = 60
 #: Benchmark whose same-window forward return is subtracted (raw EXCESS return).
 DEFAULT_BENCHMARK_TICKER = "SPY"
 
-#: Panel sentiment columns NOT carried by the served sidecar (it predates them;
-#: no sidecar consumer reads them). The one known-droppable set.
+#: The panel's event-driven sentiment columns. The canonical sidecar contract
+#: now CARRIES them (base-data#48 §2.2 — un-frozen: they are ACTIVE features
+#: of the prod XGB recipe + both GBDT WF corpora; AC-1 falsified the "the
+#: served sidecar predates them" freeze). Missing sentiment values are kept as
+#: NaN, never forward-filled (§2.4).
 SENTIMENT_COLS = ("sentiment_pos_share", "mean_sentiment", "n_articles_log")
 
-#: The exact served-sidecar column contract, IN ORDER (verified 2026-07-03
-#: against the served ``alpha158_291_fundamental_dataset_rawlabel.parquet``):
-#: the 178-column fund-panel contract minus the 3 sentiment columns, with
-#: ``fwd_60d_excess_raw`` appended = 176 columns.
-RAWLABEL_SIDECAR_COLUMNS = tuple(
-    c for c in TRANSFORMER_CORPUS_COLUMNS if c not in SENTIMENT_COLS
-) + (RAW_LABEL_COL,)
+#: The exact served-sidecar column contract, IN ORDER: the full 178-column
+#: fund-panel schema (sentiment INCLUDED) with ``fwd_60d_excess_raw`` appended
+#: = 179 columns (base-data#48 §2.2, matching the served file the 99
+#: active/candidate sanity contracts require).
+RAWLABEL_SIDECAR_COLUMNS = tuple(TRANSFORMER_CORPUS_COLUMNS) + (RAW_LABEL_COL,)
 
 #: Panel-side columns the sidecar carries through (everything but the raw label).
 _PANEL_SIDE_COLUMNS = RAWLABEL_SIDECAR_COLUMNS[:-1]
@@ -132,7 +146,7 @@ def build_rawlabel_sidecar(
     horizon_trading_days: int = DEFAULT_HORIZON_TRADING_DAYS,
     benchmark_ticker: str = DEFAULT_BENCHMARK_TICKER,
     require_exact_schema: bool = True,
-    extend_to_bar_frontier: bool = True,
+    extend_to_bar_frontier: bool = False,
     today: "dt.date | None" = None,
 ) -> dict:
     """Build the rawlabel calibration sidecar from the production fund panel.
@@ -156,14 +170,17 @@ def build_rawlabel_sidecar(
         cache is REQUIRED — no benchmark, no honest excess label, fail closed.
     require_exact_schema:
         When True (default) the panel must carry ONLY the fund-panel contract
-        columns (the sentiment columns are tolerated and dropped); any other
-        extra column fails closed. When False, extras are dropped (the output
-        still matches the served 176-column contract exactly).
+        columns (sentiment INCLUDED); any extra column fails closed. When
+        False, extras are dropped (the output still matches the 179-column
+        contract exactly).
     extend_to_bar_frontier:
-        When True (default) each ticker's axis is extended past the panel's
-        (label-clipped) frontier with its own OHLCV bar dates, so the sidecar's
-        ``max(date)`` is the bar frontier (the promote gate's rawlabel
-        semantics). Extension rows carry NaN features/labels/split.
+        When False (default, base-data#48 §2.3) the sidecar carries ZERO
+        bar-frontier extension rows — the canonical served-file recipe (no
+        consumer of the served file needs them; the σ-head validator rejected
+        them, and the served file carries none). When True each ticker's axis
+        is extended past the panel frontier with its own OHLCV bar dates
+        (extension rows carry NaN features/labels/split) — reserved for a
+        SEPARATE artifact, never a recipe fork of the served file.
     today:
         Injectable "no bar may postdate this" guard date (default: the wall
         clock). A future-dated panel row or bar fails closed — mirrors the
@@ -206,11 +223,7 @@ def build_rawlabel_sidecar(
             f"fund panel already carries {RAW_LABEL_COL!r} — refusing to "
             "re-derive a raw label on top of one (wrong input file?)"
         )
-    extras = [
-        c
-        for c in panel_cols
-        if c not in _PANEL_SIDE_COLUMNS and c not in SENTIMENT_COLS
-    ]
+    extras = [c for c in panel_cols if c not in _PANEL_SIDE_COLUMNS]
     if extras and require_exact_schema:
         raise RawLabelSidecarError(
             f"fund panel carries {len(extras)} unexpected column(s) "
@@ -393,9 +406,11 @@ def parse_args(argv: "list | None" = None) -> argparse.Namespace:
         help="Drop unexpected fund-panel columns instead of failing closed.",
     )
     parser.add_argument(
-        "--no-extend-to-bar-frontier",
+        "--extend-to-bar-frontier",
         action="store_true",
-        help="Skip the bar-frontier axis extension (panel axis only).",
+        help="Opt IN to the bar-frontier axis extension (default OFF for the "
+        "canonical served sidecar; base-data#48 §2.3 — reserved for a "
+        "separate artifact, never the served file).",
     )
     return parser.parse_args(argv)
 
@@ -412,7 +427,7 @@ def main(argv: "list | None" = None) -> int:
         horizon_trading_days=args.horizon_trading_days,
         benchmark_ticker=args.benchmark,
         require_exact_schema=not args.allow_extra_columns,
-        extend_to_bar_frontier=not args.no_extend_to_bar_frontier,
+        extend_to_bar_frontier=args.extend_to_bar_frontier,
     )
     print(json.dumps(report, indent=2))
     return 0

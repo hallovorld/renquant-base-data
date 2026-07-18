@@ -1,18 +1,26 @@
 """Tests for the committed RAWLABEL calibration-sidecar recipe (S12, B1 pattern).
 
-The served ``alpha158_291_fundamental_dataset_rawlabel.parquet`` was a one-off
-research build with no committed builder; the true recipe is the production
-fund panel (full universe, NO label dropna, sentiment columns dropped) with a
-raw (un-z-scored) ``fwd_60d_excess_raw`` recomputed point-in-time from OHLCV
-closes vs the benchmark, and the (ticker, date) axis EXTENDED to each ticker's
-bar frontier so ``max(date)`` satisfies the promote gate's 28d fast-axis SLA.
-These tests assert, on a small full-schema fixture, that the built sidecar
-matches the served 176-column schema contract EXACTLY, computes the raw label
-correctly and point-in-time, keeps unlabeled rows, extends the axis honestly
-(NaN features — never fabricated values), orders rows deterministically, and
-fails CLOSED on schema drift / missing benchmark / corrupt OHLCV / future-dated
-bars / duplicate rows. Fixtures live in tmp_path only — no production file is
-read or written.
+Under the single-writer amendment (base-data#48) this builder is the SOLE
+writer of the served ``alpha158_291_fundamental_dataset_rawlabel.parquet``.
+The canonical recipe is the production fund panel (full universe, NO label
+dropna, sentiment columns CARRIED — §2.2) with a raw (un-z-scored)
+``fwd_60d_excess_raw`` recomputed point-in-time from OHLCV closes vs the
+benchmark, and — for THIS served artifact — ZERO bar-frontier axis extension
+by default (§2.3); the opt-in extension path stays exercised for a separate
+artifact. These tests assert, on a small full-schema fixture, that the built
+sidecar matches the 179-column contract EXACTLY (sentiment included), computes
+the raw label correctly and point-in-time, keeps unlabeled rows, never
+forward-fills missing sentiment (§2.4), extends the axis honestly only when
+opted in (NaN features — never fabricated values), emits exactly the canonical
+179-column contract with zero bar-frontier extension rows (§2.5), orders rows
+deterministically, and fails CLOSED on schema drift / missing benchmark /
+corrupt OHLCV / future-dated bars / duplicate rows. Fixtures live in tmp_path
+only — no production file is read or written.
+
+The cross-repo umbrella refresh guard is NOT reimplemented here: base-data tests
+only its own schema + row-domain contract; exact guard execution against this
+built output is AC-C umbrella integration/runbook work against the pinned
+base-data revision.
 """
 from __future__ import annotations
 
@@ -128,15 +136,18 @@ def _expected_excess(ticker: str, date: pd.Timestamp) -> float:
 # ── schema contract ──────────────────────────────────────────────────────────
 
 
-def test_contract_is_the_served_176_column_schema() -> None:
-    # 178-column fund-panel contract - 3 sentiment + fwd_60d_excess_raw = 176.
-    assert len(RAWLABEL_SIDECAR_COLUMNS) == 176
+def test_contract_is_the_canonical_179_column_schema() -> None:
+    # base-data#48 §2.2: full 178-column fund-panel contract (sentiment
+    # INCLUDED) + fwd_60d_excess_raw = 179.
+    assert len(RAWLABEL_SIDECAR_COLUMNS) == 179
     assert RAWLABEL_SIDECAR_COLUMNS[:2] == ("ticker", "date")
     assert RAWLABEL_SIDECAR_COLUMNS[-1] == RAW_LABEL_COL
-    assert RAWLABEL_SIDECAR_COLUMNS[-2] == "surprise_streak"
-    assert not set(SENTIMENT_COLS) & set(RAWLABEL_SIDECAR_COLUMNS)
+    # Sentiment is un-frozen: all three columns are carried, at the panel tail
+    # just before the appended raw label (the served σ-head recipe's order).
+    assert set(SENTIMENT_COLS) <= set(RAWLABEL_SIDECAR_COLUMNS)
+    assert RAWLABEL_SIDECAR_COLUMNS[-4:-1] == SENTIMENT_COLS
     assert set(LABEL_COLS) < set(RAWLABEL_SIDECAR_COLUMNS)  # z-labels carried
-    assert len(set(RAWLABEL_SIDECAR_COLUMNS)) == 176
+    assert len(set(RAWLABEL_SIDECAR_COLUMNS)) == 179
 
 
 def test_output_schema_matches_served_contract_exactly(tmp_path: Path) -> None:
@@ -164,7 +175,10 @@ def test_output_schema_matches_served_contract_exactly(tmp_path: Path) -> None:
 
 
 def test_raw_label_is_pit_forward_excess_vs_benchmark(tmp_path: Path) -> None:
-    built, _ = _build(tmp_path)
+    # Opt in to the extension so the full BAR_DATES axis (incl trailing
+    # incomplete-window rows) exists to exercise both the labeled and PIT-NaN
+    # branches; the label math is identical whether or not the axis is extended.
+    built, _ = _build(tmp_path, extend_to_bar_frontier=True)
     for ticker in ("AAA", "BBB"):
         rows = built[built["ticker"] == ticker].set_index("date")
         for date in BAR_DATES:
@@ -178,7 +192,8 @@ def test_raw_label_is_pit_forward_excess_vs_benchmark(tmp_path: Path) -> None:
 
 
 def test_no_label_dropna_and_axis_extends_to_bar_frontier(tmp_path: Path) -> None:
-    built, report = _build(tmp_path)
+    # Opt-in extension path (base-data#48 §2.3: NOT the served-file default).
+    built, report = _build(tmp_path, extend_to_bar_frontier=True)
     # Raw semantics: the NaN-z-label panel row (d_i == 0) is KEPT.
     first = built[(built["ticker"] == "AAA") & (built["date"] == PANEL_DATES[0])]
     assert len(first) == 1
@@ -194,7 +209,7 @@ def test_no_label_dropna_and_axis_extends_to_bar_frontier(tmp_path: Path) -> Non
 
 
 def test_extension_rows_are_honest_nan_not_fabricated(tmp_path: Path) -> None:
-    built, _ = _build(tmp_path)
+    built, _ = _build(tmp_path, extend_to_bar_frontier=True)
     ext = built[built["date"] > PANEL_DATES[-1]]
     assert len(ext) > 0
     # Features, z-labels, and split_label are NaN/NA on extension rows — the
@@ -217,9 +232,25 @@ def test_no_extend_flag_keeps_the_panel_axis(tmp_path: Path) -> None:
     assert report["n_extension_rows"] == 0
 
 
+def test_default_carries_zero_extension_rows_ac_b_prime(tmp_path: Path) -> None:
+    # AC-B' (base-data#48 §2.3): the CANONICAL served-file recipe — the plain
+    # default, no kwarg — carries ZERO bar-frontier extension rows. This is the
+    # last recipe divergence from the σ-head writer, now closed.
+    built, report = _build(tmp_path)  # default extend_to_bar_frontier is OFF
+    assert report["n_extension_rows"] == 0
+    assert report["n_rows"] == report["n_panel_rows"]
+    # Every emitted row is a real panel (ticker, date) row — none is a key-only
+    # extension row (which would carry an all-NaN feature vector).
+    assert built["date"].max() == PANEL_DATES[-1]
+    feature_cols = [c for c in SIDECAR_FLOAT_COLS if c != RAW_LABEL_COL]
+    assert built[feature_cols].notna().any(axis=1).all()
+
+
 def test_missing_ohlcv_ticker_gets_nan_label_and_no_extension(tmp_path: Path) -> None:
     ohlcv = _ohlcv_dir(tmp_path, tickers=("AAA", "SPY"))  # no BBB cache
-    built, report = _build(tmp_path, ohlcv=ohlcv)
+    # Opt in to extension: a ticker with no cache stays at the panel frontier
+    # even when extension is requested (no fabricated axis).
+    built, report = _build(tmp_path, ohlcv=ohlcv, extend_to_bar_frontier=True)
     bbb = built[built["ticker"] == "BBB"]
     assert bbb[RAW_LABEL_COL].isna().all()
     assert bbb["date"].max() == PANEL_DATES[-1]  # not extended
@@ -258,12 +289,43 @@ def test_missing_contract_column_fails_closed(tmp_path: Path) -> None:
         _build(tmp_path, panel_path=_write_panel(tmp_path, frame))
 
 
-def test_missing_sentiment_columns_are_tolerated(tmp_path: Path) -> None:
-    # The served sidecar predates the sentiment columns; a panel without them
-    # (or with them — the default fixture) builds the SAME 176-column contract.
-    frame = _fund_panel_frame().drop(columns=list(SENTIMENT_COLS))
+def test_sentiment_columns_are_carried_from_the_panel(tmp_path: Path) -> None:
+    # base-data#48 §2.2: sentiment is un-frozen — the built sidecar carries the
+    # three columns with the panel's real values (no drop, no zeroing).
+    frame = _fund_panel_frame()
+    frame.loc[frame.index[0], "mean_sentiment"] = 0.73
     built, _ = _build(tmp_path, panel_path=_write_panel(tmp_path, frame))
-    assert list(built.columns) == list(RAWLABEL_SIDECAR_COLUMNS)
+    for col in SENTIMENT_COLS:
+        assert col in built.columns
+    first_key = (frame.loc[0, "ticker"], frame.loc[0, "date"])
+    got = built[(built["ticker"] == first_key[0]) & (built["date"] == first_key[1])]
+    assert got["mean_sentiment"].iloc[0] == pytest.approx(0.73)
+
+
+def test_missing_sentiment_columns_fail_closed(tmp_path: Path) -> None:
+    # Sentiment is now a REQUIRED contract column (base-data#48 §2.2); a panel
+    # dropping it is schema drift, not a tolerated legacy shape — fail closed.
+    frame = _fund_panel_frame().drop(columns=list(SENTIMENT_COLS))
+    with pytest.raises(RawLabelSidecarError, match="missing.*contract column"):
+        _build(tmp_path, panel_path=_write_panel(tmp_path, frame))
+
+
+def test_missing_sentiment_value_stays_nan_never_ffilled(tmp_path: Path) -> None:
+    # base-data#48 §2.4: sentiment is event-driven; a MISSING value must stay
+    # NaN — a forward-fill would fabricate a stale prior reading as fresh
+    # signal. AAA carries a real reading on date[1] and a missing one on the
+    # later date[2] (an "unlabeled-tail-like" row a naive ffill would clobber).
+    frame = _fund_panel_frame()
+    aaa = frame["ticker"] == "AAA"
+    d1 = frame.loc[aaa & (frame["date"] == PANEL_DATES[1])].index[0]
+    d2 = frame.loc[aaa & (frame["date"] == PANEL_DATES[2])].index[0]
+    frame.loc[d1, "mean_sentiment"] = 0.42
+    frame.loc[d2, "mean_sentiment"] = np.nan
+    built, _ = _build(tmp_path, panel_path=_write_panel(tmp_path, frame))
+    rows = built[built["ticker"] == "AAA"].set_index("date")
+    assert rows.loc[PANEL_DATES[1], "mean_sentiment"] == pytest.approx(0.42)
+    # Preserved as NaN — NOT forward-filled from date[1].
+    assert np.isnan(rows.loc[PANEL_DATES[2], "mean_sentiment"])
 
 
 def test_extra_column_fails_closed_by_default_but_droppable(tmp_path: Path) -> None:
@@ -346,6 +408,39 @@ def test_unreadable_or_empty_panel_fails_closed(tmp_path: Path) -> None:
 def test_bad_horizon_fails_closed(tmp_path: Path) -> None:
     with pytest.raises(RawLabelSidecarError, match="horizon"):
         _build(tmp_path, horizon_trading_days=0)
+
+
+# ── canonical-contract parity (base-data#48 §2.5: base-data's OWN contract) ────
+#
+# base-data owns and tests only its 179-column schema + row-domain contract.
+# Exact execution of the RenQuant umbrella refresh guard (its dropped-columns /
+# date-advance / row-ratio / ticker-coverage decision surface) against this
+# built output — and the proof that the pre-amendment 176-col recipe reproduces
+# the guard's Saturday rejection — is AC-C umbrella integration/runbook work
+# against the PINNED base-data revision. It is NOT ported across the repo
+# boundary here (a partial port would only test one branch of a foreign guard
+# and silently diverge as the umbrella evolves).
+
+
+def test_builder_output_is_exactly_the_canonical_179_contract(tmp_path: Path) -> None:
+    # base-data#48 §2.5: the served-file builder's OWN contract — the default
+    # (canonical) build emits EXACTLY the 179-column schema, in order, sentiment
+    # INCLUDED, with ZERO bar-frontier extension rows. This is the schema +
+    # row-domain surface base-data owns and can audit here; whether the umbrella
+    # refresh guard admits it is asserted in the umbrella runbook stage (AC-C),
+    # not reimplemented across the boundary.
+    built, report = _build(tmp_path)  # default: the canonical served recipe
+    # Column SET and ORDER are the canonical 179-col contract, exactly.
+    assert list(built.columns) == list(RAWLABEL_SIDECAR_COLUMNS)
+    assert set(built.columns) == set(RAWLABEL_SIDECAR_COLUMNS)
+    assert len(built.columns) == 179
+    # Sentiment is carried (the un-frozen columns the pre-amendment recipe dropped).
+    assert set(SENTIMENT_COLS) <= set(built.columns)
+    # ZERO bar-frontier extension rows — every emitted row is a real panel
+    # (ticker, date), never a key-only frontier extension.
+    assert report["n_extension_rows"] == 0
+    assert report["n_rows"] == report["n_panel_rows"]
+    assert built["date"].max() == PANEL_DATES[-1]
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
