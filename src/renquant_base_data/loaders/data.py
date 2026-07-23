@@ -374,6 +374,12 @@ def _do_incremental_fetch(
     import pandas as pd  # noqa: PLC0415
 
     end_ts = pd.Timestamp(end) if end else pd.Timestamp.now().normalize()
+    # `_last_completed_nyse_session` decides via `now >= close`; the
+    # midnight-normalized `end_ts` above is always before close, so it
+    # made every after-close default (`end=None`) call resolve to
+    # yesterday's session. Use the same wall-clock-in-ET reference
+    # `has_range` already uses for this decision.
+    freshness_ref_ts = _market_timestamp(end)
 
     # Load existing cache
     cache_path = store._path(symbol, timeframe)  # noqa: SLF001
@@ -392,12 +398,28 @@ def _do_incremental_fetch(
             log.warning("Cache read failed for %s: %s — will refetch", symbol, exc)
             cached_df = None
 
-    # Freshness check: within 2 business days of `end`
-    fresh_cutoff = end_ts - pd.Timedelta(days=2)
-    if cached_df is not None and cache_last_date is not None and cache_last_date >= fresh_cutoff:
-        log.debug("Cache hit for %s (last=%s, end=%s)",
-                  symbol, cache_last_date.date(), end_ts.date())
-        return cached_df.loc[:end_ts] if end else cached_df
+    # Freshness check: NYSE-aware. The cache is "fresh" only if it reaches the
+    # last COMPLETED trading session — consistent with the NYSE-aware staleness
+    # logic already used above (``_last_completed_nyse_session``) and with the
+    # downstream retrain freshness guard (``stale_after_days``, session-based).
+    #
+    # The prior heuristic (``cache_last_date >= end_ts - 2 CALENDAR days``)
+    # called a 2-session-stale cache "fresh" and returned it WITHOUT fetching the
+    # available delta. That deadlocks the retrain's 1-session freshness guard:
+    # on a Thursday with the cache at Tuesday, the fetch says "within 2 days,
+    # don't refetch" while the guard says ">1 session stale, fail" — so the panel
+    # feed never advances and the weekly WF promote can never pass (32d-stale
+    # artifact). Aligning both to the completed-session boundary fixes it.
+    if cached_df is not None and cache_last_date is not None:
+        _last_complete = _last_completed_nyse_session(freshness_ref_ts)
+        if _last_complete is not None:
+            _cache_fresh = cache_last_date.date() >= _last_complete
+        else:  # calendar lib unavailable — conservative 2-calendar-day fallback
+            _cache_fresh = cache_last_date >= end_ts - pd.Timedelta(days=2)
+        if _cache_fresh:
+            log.debug("Cache hit for %s (last=%s, end=%s)",
+                      symbol, cache_last_date.date(), end_ts.date())
+            return cached_df.loc[:end_ts] if end else cached_df
 
     # Incremental window: fetch only delta
     if cache_last_date is not None:
