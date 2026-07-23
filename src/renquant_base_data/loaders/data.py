@@ -374,6 +374,12 @@ def _do_incremental_fetch(
     import pandas as pd  # noqa: PLC0415
 
     end_ts = pd.Timestamp(end) if end else pd.Timestamp.now().normalize()
+    # `_last_completed_nyse_session` decides via `now >= close`; the
+    # midnight-normalized `end_ts` above is always before close, so it
+    # made every after-close default (`end=None`) call resolve to
+    # yesterday's session. Use the same wall-clock-in-ET reference
+    # `has_range` already uses for this decision.
+    freshness_ref_ts = _market_timestamp(end)
 
     # Load existing cache
     cache_path = store._path(symbol, timeframe)  # noqa: SLF001
@@ -405,7 +411,7 @@ def _do_incremental_fetch(
     # feed never advances and the weekly WF promote can never pass (32d-stale
     # artifact). Aligning both to the completed-session boundary fixes it.
     if cached_df is not None and cache_last_date is not None:
-        _last_complete = _last_completed_nyse_session(end_ts)
+        _last_complete = _last_completed_nyse_session(freshness_ref_ts)
         if _last_complete is not None:
             _cache_fresh = cache_last_date.date() >= _last_complete
         else:  # calendar lib unavailable — conservative 2-calendar-day fallback
