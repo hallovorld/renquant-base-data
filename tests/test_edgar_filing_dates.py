@@ -1,7 +1,11 @@
 """Network-free unit tests for edgar_filing_dates (the EDGAR PIT backfill)."""
 import pandas as pd
+import pytest
+
+from renquant_base_data import edgar_filing_dates
 from renquant_base_data.edgar_filing_dates import (
-    cik_variants, stamp_available_v2, restamp_fundamentals)
+    build_filing_dates, cik_variants, fetch_filing_dates_for_cik,
+    stamp_available_v2, restamp_fundamentals)
 
 
 def test_cik_variants_share_classes():
@@ -43,3 +47,44 @@ def test_restamp_keeps_v1_when_unmatched_and_flags_source():
     assert x["available_source_v2"] == "edgar_accepted"
     assert str(y["available_at_v2"].date()) == "2024-05-15"
     assert y["available_source_v2"] == "carried_v1"
+
+
+def _root_with_one_paginated_file():
+    empty = {"form": [], "acceptanceDateTime": [], "reportDate": [], "filingDate": []}
+    return {"filings": {"recent": empty, "files": [{"name": "CIK0000000001-001.json"}]}}
+
+
+def test_paginated_file_failure_fails_closed(monkeypatch):
+    """A failed paginated history-file fetch must propagate, not be silently
+    dropped (codex P1, PR #52 round 2) — a partial history must not be
+    returned as if it were complete coverage for the CIK."""
+    calls = {"n": 0}
+
+    def fake_get(url):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _root_with_one_paginated_file()
+        raise RuntimeError("SEC rate limit")
+
+    monkeypatch.setattr(edgar_filing_dates, "_get", fake_get)
+    with pytest.raises(RuntimeError):
+        fetch_filing_dates_for_cik(1)
+
+
+def test_build_filing_dates_marks_ticker_missing_on_paginated_failure(monkeypatch):
+    """The fail-closed propagation must reach build_filing_dates's per-ticker
+    handling: the ticker lands in `missing`, not partially in the output df."""
+    calls = {"n": 0}
+
+    def fake_get(url):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _root_with_one_paginated_file()
+        raise RuntimeError("SEC rate limit")
+
+    monkeypatch.setattr(edgar_filing_dates, "load_cik_map", lambda: {"ZZZZ": 1})
+    monkeypatch.setattr(edgar_filing_dates, "_get", fake_get)
+
+    df, missing = build_filing_dates(["ZZZZ"])
+    assert df.empty
+    assert missing == ["ZZZZ"]

@@ -67,15 +67,18 @@ def load_cik_map() -> dict[str, int]:
 
 
 def fetch_filing_dates_for_cik(cik: int, min_period: str = "2014-01-01") -> list[dict]:
-    """All 10-K/10-Q (original forms) for one CIK, incl. paginated history."""
+    """All 10-K/10-Q (original forms) for one CIK, incl. paginated history.
+
+    Fails closed: a fetch failure on any paginated history file propagates
+    (instead of being swallowed) so `build_filing_dates`'s per-ticker
+    try/except marks the whole CIK missing, rather than silently returning
+    a partial history mislabeled as complete coverage.
+    """
     root = _get(SUBMISSIONS_URL.format(name=f"CIK{cik:010d}.json"))
     frames = [root["filings"]["recent"]]
     for extra in root["filings"].get("files", []):
-        try:
-            frames.append(_get(SUBMISSIONS_URL.format(name=extra["name"])))
-            time.sleep(SLEEP_S)
-        except Exception:
-            continue
+        frames.append(_get(SUBMISSIONS_URL.format(name=extra["name"])))
+        time.sleep(SLEEP_S)
     rows = []
     for r in frames:
         for form, acc, rep, fdate in zip(r["form"], r["acceptanceDateTime"],
