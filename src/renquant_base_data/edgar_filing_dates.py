@@ -111,9 +111,9 @@ def stamp_available_v2(filing_dates: pd.DataFrame) -> pd.DataFrame:
     """available_at_v2 = acceptance date + 1 business day (normalized)."""
     out = filing_dates.copy()
     acc = pd.to_datetime(out["accepted_at"]).dt.tz_localize(None)
-    out["available_v2"] = (acc + pd.offsets.BDay(1)).dt.normalize()
+    out["available_at_v2"] = (acc + pd.offsets.BDay(1)).dt.normalize()
     out["period_end"] = pd.to_datetime(out["period_end"])
-    return out[["ticker", "period_end", "form", "available_v2"]]
+    return out[["ticker", "period_end", "form", "available_at_v2"]]
 
 
 def restamp_fundamentals(fundamentals: pd.DataFrame,
@@ -128,11 +128,11 @@ def restamp_fundamentals(fundamentals: pd.DataFrame,
     rec["fiscal_period_end"] = pd.to_datetime(rec["fiscal_period_end"])
     j = rec.merge(stamps.rename(columns={"period_end": "fiscal_period_end"}),
                   on=["ticker", "fiscal_period_end"], how="left")
-    j["available_at_v2"] = j["available_v2"].fillna(pd.to_datetime(j["available_at"]))
-    j["available_source_v2"] = j["available_v2"].notna().map(
+    j["available_source_v2"] = j["available_at_v2"].notna().map(
         {True: "edgar_accepted", False: "carried_v1"})
+    j["available_at_v2"] = j["available_at_v2"].fillna(pd.to_datetime(j["available_at"]))
     j = j.dropna(subset=["available_at_v2"])
-    return j.drop(columns=["available_v2"])
+    return j
 
 
 def main() -> int:

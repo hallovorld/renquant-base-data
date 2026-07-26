@@ -19,8 +19,8 @@ def test_stamp_available_v2_is_next_business_day():
         "accepted_at": ["2024-05-03T21:10:00.000Z", "2024-08-06T12:00:00.000Z"],
     })
     out = stamp_available_v2(df)
-    assert str(out.loc[0, "available_v2"].date()) == "2024-05-06"
-    assert str(out.loc[1, "available_v2"].date()) == "2024-08-07"
+    assert str(out.loc[0, "available_at_v2"].date()) == "2024-05-06"
+    assert str(out.loc[1, "available_at_v2"].date()) == "2024-08-07"
 
 
 def test_restamp_keeps_v1_when_unmatched_and_flags_source():
@@ -34,7 +34,7 @@ def test_restamp_keeps_v1_when_unmatched_and_flags_source():
         "ticker": ["X"],
         "period_end": [pd.Timestamp("2024-03-31")],
         "form": ["10-Q"],
-        "available_v2": [pd.Timestamp("2024-05-06")],
+        "available_at_v2": [pd.Timestamp("2024-05-06")],
     })
     out = restamp_fundamentals(fundamentals, stamps)
     x = out[out.ticker == "X"].iloc[0]
