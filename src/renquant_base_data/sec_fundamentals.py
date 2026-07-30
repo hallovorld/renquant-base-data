@@ -154,7 +154,44 @@ PROVENANCE_COLS = ("fiscal_period_end", "available_at")
 # 40d large-accelerated / 45d accelerated + non-accelerated). Matches the
 # ``filing_lag_days`` convention of the consuming freshness gates. This is an
 # ASSUMPTION tier, never a substitute for a genuine timestamp when one exists.
-FILING_LAG_FALLBACK_DAYS = 45
+# 2026-07-30: raised 45 -> 60 because 45 was LOOK-AHEAD on annual reports.
+#
+# When the frames API returns no ``filed`` date — the production case, 90.37% of
+# rows — availability is stamped as fiscal-period-end + this constant. Measured
+# against 36,564 real SEC filing dates:
+#
+#     form   n        median lag   p95   > 45d     median excess
+#     10-Q   27,554   33d          40d   0.5%      (conservative on 99.3%)
+#     10-K    9,010   53d          60d   77.6%     +10d LOOK-AHEAD (p95 +16d)
+#
+# 10-Ks are 24.6% of filings, so ~19% of filing events carried real look-ahead,
+# concentrated in the annual-report window — the worst place for it, since annual
+# figures are the ones that move a fundamental feature most.
+#
+# A single constant cannot be correct for both forms, and the frames payload
+# carries no form field at the point of the stamp, so the form cannot be branched
+# on here. Choosing the value is therefore a straight trade:
+#
+#   * too small -> LOOK-AHEAD, a correctness violation: the panel claims a value
+#     was knowable on a date when it provably was not, and any backtest built on
+#     it is contaminated;
+#   * too large -> STALENESS, a power cost: the value is real, just admitted
+#     later than it could have been.
+#
+# Correctness wins. 60d is the measured 10-K p95, so it is conservative for both
+# forms (10-Q p95 = 40d) at a cost of roughly 15-27 extra days of staleness on
+# quarterly rows.
+#
+# This does NOT make the panel point-in-time — it makes the fallback tier stop
+# being look-ahead. Real PIT needs the actual filing date; `filed` timestamps for
+# 830 tickers already exist on disk, but under an unversioned, gitignored path
+# with no refresh job and no code review (base-data#51/#53, both OPEN), so this
+# module deliberately does not depend on them yet.
+FILING_LAG_FALLBACK_DAYS = 60
+
+# The measured p95 filing lag for 10-K forms. The fallback must never sit below
+# this, or the annual-report look-ahead above returns.
+MEASURED_10K_P95_FILING_LAG_DAYS = 60
 # Default location of the FMP fundamentals harvest whose income-statement
 # ``acceptedDate`` backfills availability when SEC frames carry no ``filed``
 # date (the production case: the XBRL frames API returns no filing timestamp).
