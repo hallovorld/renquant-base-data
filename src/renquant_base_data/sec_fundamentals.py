@@ -818,6 +818,74 @@ def _read_price_series(path: Path) -> pd.Series | None:
     return pd.Series(pd.to_numeric(price["close"], errors="coerce").to_numpy(), index=index, name="price")
 
 
+# ---------------------------------------------------------------------------
+# Ratio safety (2026-07-30)
+# ---------------------------------------------------------------------------
+# Every derived ratio below used ``num / (denom + tiny_epsilon)``. That is unsafe
+# for two independent reasons, and the second is the one that reached the model:
+#
+#   1. It does not prevent explosion. A denominator of 1e-9 multiplies the
+#      numerator by 1e9. Measured on the shipped 830-name panel before this fix:
+#      book_to_price reached 1.68e19 on 21,722 rows (1.62% of non-null, 26
+#      tickers) and earnings_yield 7.82e17 on 19,736 rows; gross_profitability
+#      and roe were hit too. book_to_price carries 2.0% of the production
+#      scorer's gain, so those rows were trained on.
+#   2. It silently invents a sign. For a denominator of exactly 0, adding a
+#      POSITIVE epsilon makes the ratio take the numerator's sign as though that
+#      were information. It is not.
+#
+# A ratio that cannot be computed must encode as NaN. A huge finite number says
+# "computable and enormous", which the downstream model cannot distinguish from
+# a real value -- and in the EXTENDED path the subsequent z-score + clip to
+# [-3, 3] converts it into a perfectly legitimate-looking +/-3.0, so the defect
+# was HIDDEN rather than absent.
+#
+# The guard is on the OUTPUT MAGNITUDE, not on an absolute denominator floor.
+# My first attempt used absolute USD floors (1e6) and broke 10 existing tests,
+# because an absolute floor silently couples this function to a unit assumption:
+# it would also void a legitimately small-denominator filer (reporting in
+# thousands, or a non-USD filer) and it makes the function untestable with small
+# fixtures. Bounding the output instead is unit-free and targets the actual
+# failure mode directly. The bound sits four to five orders of magnitude above
+# anything real -- the widest genuine value observed on an as-filed 830-name
+# build is roe ~= 214 on tiny-equity names -- so it separates "not computable"
+# from "computable", and does NOT winsorise a real distribution.
+MAX_ABS_RATIO = 1.0e6
+
+
+def _safe_ratio(
+    numerator: pd.Series,
+    denominator: pd.Series,
+    *,
+    max_abs_ratio: float = MAX_ABS_RATIO,
+) -> pd.Series:
+    """``numerator / denominator``, NaN where the result is not a real ratio.
+
+    NaN is returned when the denominator is zero or non-finite, or when the
+    quotient's magnitude exceeds ``max_abs_ratio`` -- the signature of a
+    divide-by-near-zero rather than of a large real value.
+
+    A legitimately NEGATIVE denominator divides normally and keeps its sign: book
+    equity is negative for heavily levered firms and those rows must not vanish.
+
+    Scope note: this does not change the semantics of a ratio taken against a
+    genuinely negative denominator -- ROE on negative equity stays a negative
+    number rather than becoming NaN. Whether that quantity is meaningful is a
+    separate question from this defect, and conflating the two would smuggle a
+    semantics change into a bug fix.
+    """
+    num = pd.to_numeric(numerator, errors="coerce")
+    denom = pd.to_numeric(denominator, errors="coerce")
+    # An infinite denominator passes any magnitude test and would divide to 0.0,
+    # reading as a real ratio of zero. It is garbage input, so it is refused
+    # alongside zero. (Caught by this fix's own test suite.)
+    usable = np.isfinite(denom) & (denom != 0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = num.where(usable) / denom.where(usable)
+    out = out.replace([np.inf, -np.inf], np.nan)
+    return out.where(out.abs() <= float(max_abs_ratio))
+
+
 def _numeric_series(frame: pd.DataFrame, name: str) -> pd.Series:
     if name not in frame.columns:
         return pd.Series(np.nan, index=frame.index, dtype="float64")
@@ -971,10 +1039,13 @@ def compute_derived_features(daily_raw: pd.DataFrame, ohlcv_dir: str | Path) -> 
         result = pd.DataFrame(index=merged.index)
         result["ticker"] = str(ticker)
         with np.errstate(invalid="ignore", divide="ignore"):
-            result["earnings_yield"] = ni / (market_cap + 1e-9)
-            result["book_to_price"] = equity / (market_cap + 1e-9)
-            result["gross_profitability"] = gp / (assets + 1e-9)
-            result["roe"] = ni / (equity + 1e-9)
+            result["earnings_yield"] = _safe_ratio(
+                ni, market_cap)
+            result["book_to_price"] = _safe_ratio(
+                equity, market_cap)
+            result["gross_profitability"] = _safe_ratio(
+                gp, assets)
+            result["roe"] = _safe_ratio(ni, equity)
             result["asset_growth"] = assets.pct_change(periods=252).clip(-0.99, 5.0)
         result = result.replace([np.inf, -np.inf], np.nan)
 
@@ -1039,13 +1110,18 @@ def compute_extended_quarterly_features(quarterly: pd.DataFrame) -> pd.DataFrame
         liabilities = _numeric_series(group, "Liabilities") if "Liabilities" in group else None
 
         with np.errstate(invalid="ignore", divide="ignore"):
-            group["asset_turnover"] = revenue / (assets + 1e-9)
-            group["profit_margin"] = ni / (revenue + 1e-9)
-            group["return_on_assets"] = ni / (assets + 1e-9)
+            group["asset_turnover"] = _safe_ratio(
+                revenue, assets)
+            group["profit_margin"] = _safe_ratio(
+                ni, revenue)
+            group["return_on_assets"] = _safe_ratio(
+                ni, assets)
             if liabilities is not None:
-                group["debt_to_assets"] = liabilities / (assets + 1e-9)
+                group["debt_to_assets"] = _safe_ratio(
+                    liabilities, assets)
             else:
-                group["debt_to_assets"] = (assets - equity) / (assets + 1e-9)
+                group["debt_to_assets"] = _safe_ratio(
+                    assets - equity, assets)
             group["rev_growth_yoy"] = revenue.pct_change(periods=4)
             group["ni_growth_yoy"] = ni.pct_change(periods=4)
             group["equity_growth"] = equity.pct_change(periods=4)
