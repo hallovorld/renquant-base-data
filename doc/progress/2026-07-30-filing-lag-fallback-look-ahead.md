@@ -9,9 +9,18 @@ WHAT:      `src/renquant_base_data/sec_fundamentals.py::FILING_LAG_FALLBACK_DAYS
            constant pins the measured bound. 3 new tests in
            `tests/test_filing_lag_fallback.py` pin the direction of the trade
            (fallback must not sit below the measured 10-K p95; must actually
-           reject the old `45`; must stay under 120d). Stacked on #55 (both
-           touch `sec_fundamentals.py`); base branch retargets to `main` once
-           #55 merges.
+           reject the old `45`; must stay under 120d).
+
+           STACKING RESOLVED (was stale in an earlier revision of this doc,
+           which said "Stacked on #55... retargets to `main` once #55
+           merges"). #55 MERGED to `main` as `abefef7`. Verified this session:
+           this branch is 0 commits behind `origin/main` and 2 ahead; its diff
+           against `main` touches only the filing-lag constant, this doc, and
+           `tests/test_filing_lag_fallback.py`; and it does NOT touch the
+           ratio-denominator guard #55 landed (`git diff origin/main --
+           sec_fundamentals.py` matches 0 lines mentioning
+           computable/NaN/denom). So the two changes are cleanly separated in
+           `main` + this branch, with nothing duplicated or reverted.
 WHY/DIR:   Measured against 36,564 real SEC filing dates: 10-K median lag 53d,
            p95 60d, with 77.6% of 10-K filings exceeding the old 45d assumption
            (median +10d look-ahead, p95 +16d). 10-Ks are 24.6% of filings, so
