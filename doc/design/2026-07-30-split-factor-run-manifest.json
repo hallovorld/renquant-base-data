@@ -23,7 +23,9 @@
     },
     "outputs": {
       "split_factors_830.parquet": "0ecea3fc142c9ffc3d6cd6ee9a0cc701b182e718d55a741605959cea060f83a6",
-      "split_factor_meta.csv": "c0837f260c29940008bc801d8e74e0ec448d4c05c1e2ce3297c625f9fa3d3bb4"
+      "split_factor_meta.csv": "c0837f260c29940008bc801d8e74e0ec448d4c05c1e2ce3297c625f9fa3d3bb4",
+      "split_factors_830.parquet.content_sha256": "45c9cde8ab1f299991a5355bca9c1956e8043137459c11ac665dd10340a61603",
+      "split_factor_meta.csv_note": "byte-identical to the original run (plain text, no embedded writer version)"
     },
     "generated_at": "2026-07-30T05:23:45.187482+00:00"
   },
@@ -45,12 +47,21 @@
       "rows": 1380434,
       "tickers": 830
     },
-    "generated_at": "2026-07-30T05:24:51.694079+00:00"
+    "generated_at": "2026-07-30T05:24:51.694079+00:00",
+    "outputs": {
+      "pit_panel_v2_split_adj.parquet.content_sha256": "e144c4c844f57979c911ad9fbe352b7f022d9a3f66640d23bb01c57d020d97e7"
+    }
   },
   "superseded": {
     "reason": "round-3 manifest was generated against tool_git_sha=729f68a, one commit before this PR's tip (85069bf added tools/build_pit_panel_shared.py and changed _work_dir()'s default fallback) -- codex round-4 review flagged the SHA mismatch (renquant-base-data#58)",
     "tool_git_sha": "729f68a61c8e593f61180e8146a6208ca8f9048f",
     "build_split_factor_output_sha256": "1f06237a76dd423a22aec91a36114b319823a7c0f6dfe295f110363362b8a155",
     "build_pit_panel_v2_output_sha256": "d3baeeaa7f42e1b4ad4058260180e0a5664532c9314f1c730d34ca6556169ac8"
+  },
+  "reproducibility_caveat": {
+    "why_this_matters": "The parquet FILE hash recorded below is ENVIRONMENT-DEPENDENT and must not be used on its own as the reproducibility anchor. pyarrow embeds its own version string in the file (parquet metadata `created_by`), so an identical dataframe serialises to different bytes under different pyarrow versions. A reproducer on another machine would see a hash mismatch and reasonably conclude the reproduction FAILED when the data is in fact identical.",
+    "measured": "The original session's split_factors_830.parquet was written by parquet-cpp-arrow 23.0.1 -> file sha256 1f06237a76dd423a...; the re-run here by 21.0.0 -> 0ecea3fc142c9ffc3d.... Data compared directly: same 1,370,220 rows, same 825 tickers, identical route counts (measured 1,369,069 / reconstructed 1,151), and ZERO differing cum_factor values at 9 decimal places. Confirmed separately that pyarrow IS deterministic for a fixed dataframe within one version, so the delta is purely the embedded writer version, not the computation.",
+    "resolution": "Each parquet output additionally carries `*.content_sha256`: a fingerprint over values sorted by (ticker, date) with floats rounded to 9dp, which carries no writer metadata and is therefore pyarrow-version independent. VERIFIED to match between the 23.0.1 original and the 21.0.0 re-run. Compare content_sha256 first; treat a file-hash mismatch with a matching content_sha256 as a PASS. split_factor_meta.csv needed no such treatment and matched byte-for-byte, being plain text.",
+    "pyarrow_version_this_run": "21.0.0"
   }
 }
