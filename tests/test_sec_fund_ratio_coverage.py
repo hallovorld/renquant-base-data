@@ -96,7 +96,12 @@ def _build_daily(tmp_path: Path, raw: pd.DataFrame, tickers: list[str],
 
 def test_primary_tag_values_pinned_to_prefix_formulas(tmp_path: Path) -> None:
     """A ticker fully served by the PRIMARY tags must produce values from the
-    exact pre-fix formulas (ni/(shares*price+1e-9) etc.) — pins that the
+    exact ratio formulas (ni/(shares*price) etc.) — pins that the
+    UPDATED 2026-07-30: these expectations previously embedded the `+ 1e-9`
+    epsilon itself, i.e. they pinned the DEFECT rather than the ratio. The
+    epsilon is what let a near-zero denominator emit 1.68e19 on 1.62% of the
+    shipped 830-name panel, so it was removed from the implementation and
+    these expectations now name the true ratio. What the test pins — that the
     fallback chains and carry-forward change NOTHING for already-finite
     cells."""
     raw = pd.DataFrame(
@@ -119,10 +124,10 @@ def test_primary_tag_values_pinned_to_prefix_formulas(tmp_path: Path) -> None:
     row = daily[daily["date"] == pd.Timestamp("2020-05-10")].iloc[0]
 
     market_cap = 10.0 * PRICE
-    assert row["earnings_yield"] == 10.0 / (market_cap + 1e-9)
-    assert row["book_to_price"] == 80.0 / (market_cap + 1e-9)
-    assert row["gross_profitability"] == 25.0 / (200.0 + 1e-9)
-    assert row["roe"] == 10.0 / (80.0 + 1e-9)
+    assert row["earnings_yield"] == 10.0 / market_cap
+    assert row["book_to_price"] == 80.0 / market_cap
+    assert row["gross_profitability"] == 25.0 / 200.0
+    assert row["roe"] == 10.0 / 80.0
 
 
 # ---------------------------------------------------------------------------
@@ -195,8 +200,8 @@ def test_carry_forward_survives_filing_without_shares(tmp_path: Path) -> None:
     q2_row = daily.loc[pd.Timestamp("2020-08-10")]
     market_cap = 10.0 * PRICE
     # Q1 row untouched; Q2 row uses fresh NI with the CARRIED share count.
-    assert q1_row["earnings_yield"] == 10.0 / (market_cap + 1e-9)
-    assert q2_row["earnings_yield"] == 12.0 / (market_cap + 1e-9)
+    assert q1_row["earnings_yield"] == 10.0 / market_cap
+    assert q2_row["earnings_yield"] == 12.0 / market_cap
     # provenance still describes the LATEST filing (never carried)
     assert q2_row["fiscal_period_end"] == pd.Timestamp("2020-06-30")
 
