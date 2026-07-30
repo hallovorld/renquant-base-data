@@ -22,8 +22,24 @@ from pathlib import Path
 import pandas as pd
 
 RQ = Path("/Users/renhao/git/github/RenQuant")
-OUT = Path("/private/tmp/claude-502/-Users-renhao-git-github-renquant-orchestrator/"
-           "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+def _work_dir() -> Path:
+    """Scratch work dir for this split-fix lane, overridable.
+
+    Was a hard-coded agent-session path under /private/tmp, which made every
+    number these tools produce unreproducible by anyone else (codex review on
+    base-data#58). Set RQ_SPLIT_FIX_DIR to relocate; the previous path stays as
+    the default so existing artifacts keep resolving.
+    """
+    import os
+    env = os.environ.get("RQ_SPLIT_FIX_DIR")
+    if env:
+        return Path(env).expanduser()
+    return Path("/private/tmp/claude-502/"
+                "-Users-renhao-git-github-renquant-orchestrator/"
+                "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+
+
+OUT = _work_dir()
 assert not str(OUT).startswith(str(RQ)), "output must be outside the production tree"
 
 KEY = None
@@ -72,7 +88,15 @@ man = {
     "requested": len(TICKERS), "with_data": int(df.ticker.nunique()),
     "no_data": len(no_data), "errors": len(errs),
     "rows": len(df),
-    "no_data_tickers": no_data, "error_samples": errs[:20],
+    # FULL list, not a sample: build_split_factor.py treats a ticker with an
+    # empty calendar as "authoritative never split" ONLY if it appears in
+    # no_data_tickers. A truncated error list would let an errored ticker look
+    # like a clean no-event answer, which is the fail-open this manifest exists
+    # to prevent. error_samples stays for human reading; error_tickers is the
+    # machine-readable contract.
+    "no_data_tickers": no_data,
+    "error_tickers": sorted({e["ticker"] for e in errs}),
+    "error_samples": errs[:20],
     "fetched_at": pd.Timestamp.utcnow().isoformat(),
     "note": ("no_data == FMP has no split history for the symbol == authoritative "
              "'never split'. errors are NOT authoritative and must be treated as unknown."),

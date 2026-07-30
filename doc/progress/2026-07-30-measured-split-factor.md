@@ -1,7 +1,49 @@
 # Progress: split factors MEASURED against the stored series, not reconstructed
 
-STATUS:   delivered. Reusable builder + validation. No production path written;
-          the corrected panel itself stays in scratch (data files are not committed).
+STATUS:   builder + fail-closed guard + fixture tests DELIVERED. The corrected
+          panel and its continuity statistics are **PENDING REPRODUCIBLE
+          EXECUTION** — not delivered. No production path written.
+
+          Revised after codex P1/P1/P2. What changed and what it means:
+
+          P1a FAIL-OPEN CLOSED (data-correctness bug). `reconstructed_factor`
+          emitted `cum_factor = 1.0` whenever the union calendar had no row for
+          a ticker. That conflates two different things: FMP answering "no split
+          history" (authoritative) with the request having FAILED (nothing
+          known). `harvest_splits_830.py` already recorded both and its own
+          manifest note says "errors are NOT authoritative and must be treated
+          as unknown" — the builder just never read it. So an errored ticker
+          with no raw-price fallback silently published an UNADJUSTED
+          market-cap basis as if verified. Now `load_split_retrieval_status()`
+          reads the manifest and 1.0 is emitted ONLY against a recorded
+          authoritative no-event response; anything else FAILS. The default
+          argument is `None`, which DENIES, so a caller that forgets to pass
+          the set cannot fail open either. A missing manifest fails every
+          empty-calendar ticker — no manifest, no authority.
+
+          Additional gap found while fixing it: the manifest recorded only
+          `error_samples: errs[:20]`, so even a builder that DID read it could
+          not know every errored ticker. It now also writes the full
+          `error_tickers` list; the loader falls back to deriving from the
+          truncated samples for older manifests, and says so.
+
+          P1b REPRODUCIBILITY. All four tools hard-coded an agent-session path
+          under `/private/tmp`, which made every number they produce
+          unreproducible by anyone else. Now `_work_dir()` reads
+          `RQ_SPLIT_FIX_DIR`, defaulting to the previous path so existing
+          artifacts keep resolving. The panel/continuity claims are downgraded
+          to PENDING above rather than restated: the run bundle with input
+          checksums, request status, retrieval time and output fingerprints
+          does not exist yet, and the model A/B stays BLOCKED on it.
+
+          P2 CI COVERAGE. `tests/test_split_factor_fail_closed.py` (7 tests)
+          exercises the builder against fixtures instead of only an untracked
+          scratch run: the exact error-plus-missing-raw case, an authoritative
+          no-event ticker still getting 1.0, a ticker absent from the manifest,
+          a missing manifest, an omitted status argument, a real split event
+          still reconstructing, and a legacy truncated-manifest fallback.
+          Verified load-bearing rather than decorative: with the guard reverted,
+          5 of the 7 FAIL.
 
 WHAT:     `tools/build_split_factor.py` — per-ticker daily cumulative adjustment
           factor. `tools/build_pit_panel_v2.py` — the PIT panel rebuilt with

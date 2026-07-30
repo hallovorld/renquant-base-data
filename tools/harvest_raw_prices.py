@@ -30,8 +30,24 @@ import pandas as pd
 
 RQ = Path("/Users/renhao/git/github/RenQuant")
 OHLCV = RQ / "data/ohlcv"
-OUT = Path("/private/tmp/claude-502/-Users-renhao-git-github-renquant-orchestrator/"
-           "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+def _work_dir() -> Path:
+    """Scratch work dir for this split-fix lane, overridable.
+
+    Was a hard-coded agent-session path under /private/tmp, which made every
+    number these tools produce unreproducible by anyone else (codex review on
+    base-data#58). Set RQ_SPLIT_FIX_DIR to relocate; the previous path stays as
+    the default so existing artifacts keep resolving.
+    """
+    import os
+    env = os.environ.get("RQ_SPLIT_FIX_DIR")
+    if env:
+        return Path(env).expanduser()
+    return Path("/private/tmp/claude-502/"
+                "-Users-renhao-git-github-renquant-orchestrator/"
+                "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+
+
+OUT = _work_dir()
 CACHE = OUT / "raw_price_cache"
 CACHE.mkdir(parents=True, exist_ok=True)
 assert not str(OUT).startswith(str(RQ)), "output must be outside the production tree"

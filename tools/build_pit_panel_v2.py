@@ -41,8 +41,24 @@ import pandas as pd
 RQ = Path("/Users/renhao/git/github/RenQuant")
 RAW = RQ / "data/edgar_pit/companyfacts_asfiled_raw.parquet"
 OHLCV = RQ / "data/ohlcv"
-SCRATCH = Path("/private/tmp/claude-502/-Users-renhao-git-github-renquant-orchestrator/"
-               "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+def _work_dir() -> Path:
+    """Scratch work dir for this split-fix lane, overridable.
+
+    Was a hard-coded agent-session path under /private/tmp, which made every
+    number these tools produce unreproducible by anyone else (codex review on
+    base-data#58). Set RQ_SPLIT_FIX_DIR to relocate; the previous path stays as
+    the default so existing artifacts keep resolving.
+    """
+    import os
+    env = os.environ.get("RQ_SPLIT_FIX_DIR")
+    if env:
+        return Path(env).expanduser()
+    return Path("/private/tmp/claude-502/"
+                "-Users-renhao-git-github-renquant-orchestrator/"
+                "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+
+
+SCRATCH = _work_dir()
 
 Q_SPAN, ANNUAL_SPAN, TTM_SPAN = (80, 100), (350, 380), (330, 400)
 AVAIL_BUFFER_DAYS = 1

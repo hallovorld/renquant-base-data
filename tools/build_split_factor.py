@@ -47,6 +47,7 @@ Writes only: this scratch dir.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -55,8 +56,24 @@ import pyarrow.parquet as pq
 
 RQ = Path("/Users/renhao/git/github/RenQuant")
 OHLCV = RQ / "data/ohlcv"
-OUT = Path("/private/tmp/claude-502/-Users-renhao-git-github-renquant-orchestrator/"
-           "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+def _work_dir() -> Path:
+    """Scratch work dir for this split-fix lane, overridable.
+
+    Was a hard-coded agent-session path under /private/tmp, which made every
+    number these tools produce unreproducible by anyone else (codex review on
+    base-data#58). Set RQ_SPLIT_FIX_DIR to relocate; the previous path stays as
+    the default so existing artifacts keep resolving.
+    """
+    import os
+    env = os.environ.get("RQ_SPLIT_FIX_DIR")
+    if env:
+        return Path(env).expanduser()
+    return Path("/private/tmp/claude-502/"
+                "-Users-renhao-git-github-renquant-orchestrator/"
+                "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+
+
+OUT = _work_dir()
 CACHE = OUT / "raw_price_cache"
 
 # a step below this is immaterial (0.2% of market cap) and indistinguishable from the
@@ -194,11 +211,58 @@ def measured_factor(t: str, close: pd.Series,
                   "tail_level_before_anchor": tail_level}
 
 
-def reconstructed_factor(t: str, close: pd.Series, cal: pd.DataFrame) -> tuple[pd.Series | None, dict]:
+def load_split_retrieval_status() -> tuple[frozenset[str], frozenset[str]]:
+    """(authoritative_no_event, unknown) ticker sets from the harvest manifest.
+
+    An EMPTY calendar for a ticker has two completely different causes and the
+    calendar alone cannot tell them apart:
+
+      * FMP answered and has no split history  -> authoritative "never split"
+      * the request FAILED                     -> we know NOTHING
+
+    `harvest_splits_830.py` already records both, and its own manifest note says
+    "errors are NOT authoritative and must be treated as unknown". Before this
+    function existed the builder never read it, so an errored ticker with no raw
+    price fallback silently emitted `cum_factor = 1.0` -- publishing an
+    unadjusted market-cap basis as though it had been verified.
+
+    Returns EMPTY sets when the manifest is missing, which makes every
+    empty-calendar ticker FAIL rather than defaulting to 1.0: no manifest means
+    no authority to claim "never split".
+    """
+    mp = OUT / "fmp_splits_830.manifest.json"
+    if not mp.exists():
+        return frozenset(), frozenset()
+    try:
+        man = json.loads(mp.read_text())
+    except (OSError, ValueError):
+        return frozenset(), frozenset()
+    no_ev = frozenset(str(x) for x in (man.get("no_data_tickers") or []))
+    errs = frozenset(str(x) for x in (man.get("error_tickers") or []))
+    if not errs:
+        # older manifests only carried a truncated `error_samples`; derive what
+        # we can, and note that the derivation is partial.
+        errs = frozenset(str(e.get("ticker")) for e in (man.get("error_samples") or [])
+                         if isinstance(e, dict) and e.get("ticker"))
+    return no_ev, errs
+
+
+def reconstructed_factor(t: str, close: pd.Series, cal: pd.DataFrame,
+                         authoritative_no_event: "frozenset[str] | None" = None,
+                         ) -> tuple[pd.Series | None, dict]:
     """F(t) = prod of calendar ratios with ex-date > t (fallback route)."""
     g = cal[cal.ticker == t]
     if g.empty:
-        # ticker has an authoritative 'never split' answer -> factor is exactly 1
+        # An empty calendar is NOT by itself a "never split" answer -- see
+        # load_split_retrieval_status. Emit 1.0 only against a recorded
+        # authoritative no-event response; otherwise FAIL CLOSED.
+        if authoritative_no_event is None or t not in authoritative_no_event:
+            return None, {
+                "why": "no-authoritative-no-event-answer",
+                "detail": ("empty split calendar and no recorded authoritative "
+                           "'no split history' response for this ticker, so a "
+                           "factor of 1.0 would be a guess, not a measurement"),
+            }
         return pd.Series(1.0, index=close.index), {"why": "reconstructed-no-events",
                                                    "n_segments": 1, "steps": []}
     ev = g[(g.date > close.index.min()) & (g.date <= close.index.max())]
@@ -211,6 +275,7 @@ def reconstructed_factor(t: str, close: pd.Series, cal: pd.DataFrame) -> tuple[p
 
 def build(tickers: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
     cal = union_calendar()
+    authoritative_no_event, unknown_tickers = load_split_retrieval_status()
     caldates = {t: g["date"].values.astype("datetime64[ns]")
                 for t, g in cal.groupby("ticker", sort=False)}
     frames, meta = [], []
@@ -228,9 +293,11 @@ def build(tickers: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
                 # reconstruction would be a guess dressed as a measurement.
                 meta.append({"ticker": t, "route": "FAIL", "why": why_m})
                 continue
-            f, info = reconstructed_factor(t, close, cal)
+            f, info = reconstructed_factor(t, close, cal, authoritative_no_event)
             route = "reconstructed"
             info["measured_failed_because"] = why_m
+            if t in unknown_tickers:
+                info["split_retrieval"] = "unknown (request errored)"
         if f is None:
             meta.append({"ticker": t, "route": "FAIL", "why": info.get("why")})
             continue
