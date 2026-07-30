@@ -1,4 +1,4 @@
-# 2026-07-30 — filing-lag fallback: 45d was LOOK-AHEAD on 10-Ks (PR #56)
+# 2026-07-30 — filing-lag fallback: 45d was LOOK-AHEAD on 10-Ks (PR #57)
 
 STATUS:    delivered
 WHAT:      `src/renquant_base_data/sec_fundamentals.py::FILING_LAG_FALLBACK_DAYS`
@@ -19,11 +19,17 @@ WHY/DIR:   Measured against 36,564 real SEC filing dates: 10-K median lag 53d,
            was filed — concentrated in the annual-report window, which moves a
            fundamental feature the most. A single constant cannot be exact for
            both forms (frames payload carries no form field at the stamp
-           point), so this is a correctness-vs-staleness trade; correctness
-           wins. This does NOT make the panel point-in-time — real `filed`
-           timestamps for 830 tickers exist on disk but under an unversioned,
-           gitignored path with no refresh job or review (base-data #51/#53,
-           both open) — it only stops the fallback tier from being look-ahead.
+           point). **2026-07-30 review correction**: raising the fallback to
+           the measured p95 is a RISK REDUCTION (cuts 10-K look-ahead
+           incidence 77.6% -> ~5% of the same sample), not a correctness fix —
+           by definition of "p95" the residual ~5% of 10-K filings (and a
+           smaller 10-Q tail) still file after the new stamp, so this does NOT
+           stop the fallback tier from being look-ahead, only reduces its
+           incidence. No max-lag bound verified against the full filing corpus
+           exists; that is unstarted follow-up. This does NOT make the panel
+           point-in-time — real `filed` timestamps for 830 tickers exist on
+           disk but under an unversioned, gitignored path with no refresh job
+           or review (base-data #51/#53, both open).
 EVIDENCE:
   artifact:      `src/renquant_base_data/sec_fundamentals.py::FILING_LAG_FALLBACK_DAYS`
                  (this PR); measured `[VERIFIED-now]` against 36,564 real SEC
@@ -39,11 +45,16 @@ EVIDENCE:
                  `[VERIFIED-now]`. Tier mix: `expected_filing_lag` 90.37%,
                  `fmp_accepted` 2.88%, NULL 6.75%, `sec_filed` 0.00%.
   best-known?:   yes for this fallback-only fix — 60d is the measured 10-K
-                 p95, conservative for both forms at the cost of ~15-27 extra
-                 staleness days on quarterly rows. A form-aware fallback
+                 p95, a RISK REDUCTION (not a conservative bound — ~5% of
+                 measured 10-K filings still exceed it) at the cost of ~15-27
+                 extra staleness days on quarterly rows. A form-aware fallback
                  (infer fiscal-year-end per ticker, apply 60d only to annual
                  rows) would recover the lost quarterly freshness but adds
                  code/failure surface — named as follow-up, not built here.
+                 A genuinely conservative (max-lag) bound verified against the
+                 full filing corpus is a separate, unstarted follow-up; the
+                 real PIT fix (base-data #51/#53) remains the only way to
+                 eliminate the residual, not just reduce it.
   scope:         "this is a fallback-constant bug fix in renquant-base-data,
                  read/compute only, vs the pre-fix 45d that was look-ahead on
                  77.6% of 10-Ks; full suite 480 passed / 0 failed here
