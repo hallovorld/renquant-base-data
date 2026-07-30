@@ -1,8 +1,8 @@
 {
-  "note": "Fix-pass reproduction (renquant-base-data#58 review round 2, on top of the round-2 fail-closed fix already landed at 729f68a): reran tools/build_split_factor.py and tools/build_pit_panel_v2.py against the SAME cached FMP inputs the original session harvested (raw_price_cache/, fmp_splits_830.parquet, fmp_splits_830.manifest.json) via RQ_SPLIT_FIX_DIR -- zero new network calls. Reproduces the original session headline numbers exactly (5 FAIL tickers, 53 dei units-error facts / 36 tickers, 0 PIT validation violations, 1,380,434 rows / 830 tickers) under the NOW-STRICTER fail-closed reconstructed_factor() (729f68a): an empty calendar only yields 1.0 against a recorded authoritative no-event response. No production path written; outputs stayed in /private/tmp scratch, never committed (large-blob policy).",
+  "note": "Fix-pass reproduction (renquant-base-data#58 review round 4, on top of the round-3 BLOCKER/HIGH fix at 85069bf): reran tools/build_split_factor.py and tools/build_pit_panel_v2.py at HEAD=85069bf against the SAME cached FMP inputs the original session harvested (raw_price_cache/, fmp_splits_830.parquet, fmp_splits_830.manifest.json) via RQ_SPLIT_FIX_DIR -- zero new network calls. Supersedes the round-2 manifest below, which was tagged tool_git_sha=729f68a and therefore predated round 3's build_pit_panel_shared.py addition and _work_dir() default change -- this run's tool_git_sha now matches the reviewed PR tip. Reproduces the original session headline numbers exactly (5 FAIL tickers, 53 dei units-error facts / 36 tickers, 0 PIT validation violations, 1,380,434 rows / 830 tickers) under the fail-closed reconstructed_factor() (729f68a): an empty calendar only yields 1.0 against a recorded authoritative no-event response. No production path written; outputs stayed in /private/tmp scratch, never committed (large-blob policy).",
   "build_split_factor": {
     "tool": "build_split_factor.py",
-    "tool_git_sha": "729f68a61c8e593f61180e8146a6208ca8f9048f",
+    "tool_git_sha": "85069bf395e78dca542e6fcb8e723840de40c0de",
     "workdir": "/private/tmp/rqbd-split-repro",
     "inputs": {
       "tickers.txt": "55cf11d1ccbdd3a0e5148561b2e213ed086360026cb6a49bec87c1ff61486c93",
@@ -22,18 +22,18 @@
       "reconstructed": 1
     },
     "outputs": {
-      "split_factors_830.parquet": "1f06237a76dd423a22aec91a36114b319823a7c0f6dfe295f110363362b8a155",
+      "split_factors_830.parquet": "0ecea3fc142c9ffc3d6cd6ee9a0cc701b182e718d55a741605959cea060f83a6",
       "split_factor_meta.csv": "c0837f260c29940008bc801d8e74e0ec448d4c05c1e2ce3297c625f9fa3d3bb4"
     },
-    "generated_at": "2026-07-30T05:07:04.636963+00:00"
+    "generated_at": "2026-07-30T05:23:45.187482+00:00"
   },
   "build_pit_panel_v2": {
     "tool": "build_pit_panel_v2.py",
-    "tool_git_sha": "729f68a61c8e593f61180e8146a6208ca8f9048f",
+    "tool_git_sha": "85069bf395e78dca542e6fcb8e723840de40c0de",
     "scratch": "/private/tmp/rqbd-split-repro",
     "inputs": {
       "companyfacts_asfiled_raw.parquet": "aed294cac5b8a03d200f3aef1ace9195ac19c1bd016972724d91e79004f2ef31",
-      "split_factors_830.parquet": "1f06237a76dd423a22aec91a36114b319823a7c0f6dfe295f110363362b8a155",
+      "split_factors_830.parquet": "0ecea3fc142c9ffc3d6cd6ee9a0cc701b182e718d55a741605959cea060f83a6",
       "split_factor_meta.csv": "c0837f260c29940008bc801d8e74e0ec448d4c05c1e2ce3297c625f9fa3d3bb4"
     },
     "n_tickers_with_factor": 825,
@@ -41,10 +41,16 @@
     "n_share_facts_no_factor": 120,
     "output": {
       "path": "/private/tmp/rqbd-split-repro/pit_fundamentals_830_splitfixed.parquet",
-      "sha256": "d3baeeaa7f42e1b4ad4058260180e0a5664532c9314f1c730d34ca6556169ac8",
+      "sha256": "89ffcb672beb85b133d83f221751b0e6073315fec4e15ec203bad14e50e1b04c",
       "rows": 1380434,
       "tickers": 830
     },
-    "generated_at": "2026-07-30T05:07:51.907398+00:00"
+    "generated_at": "2026-07-30T05:24:51.694079+00:00"
+  },
+  "superseded": {
+    "reason": "round-3 manifest was generated against tool_git_sha=729f68a, one commit before this PR's tip (85069bf added tools/build_pit_panel_shared.py and changed _work_dir()'s default fallback) -- codex round-4 review flagged the SHA mismatch (renquant-base-data#58)",
+    "tool_git_sha": "729f68a61c8e593f61180e8146a6208ca8f9048f",
+    "build_split_factor_output_sha256": "1f06237a76dd423a22aec91a36114b319823a7c0f6dfe295f110363362b8a155",
+    "build_pit_panel_v2_output_sha256": "d3baeeaa7f42e1b4ad4058260180e0a5664532c9314f1c730d34ca6556169ac8"
   }
 }

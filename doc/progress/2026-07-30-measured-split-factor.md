@@ -1,16 +1,18 @@
 # Progress: split factors MEASURED against the stored series, not reconstructed
 
 STATUS:   builder + fail-closed guard + fixture tests + BLOCKER fix +
-          reproducibility bundle DELIVERED. No production path written; the
+          reproducibility bundle DELIVERED, bundle re-verified against this
+          commit's own SHA (round 4). No production path written; the
           corrected panel itself stays in scratch (data files are not
           committed — large-blob policy). The comparative V1-V5 report
           (magnitude-vs-stage1, negative control, residual jumps) remains
-          prior-work-only, not reproduced in this pass — see FIX ROUND 3
-          below.
+          prior-work-only, not reproduced in this pass — see FIX ROUND 3 /
+          FIX ROUND 4 below.
 
           Revised after codex P1/P1/P2 (round 2, commit 729f68a), then again
-          after a BLOCKER + reproducibility follow-up (round 3, this commit).
-          What changed and what it means:
+          after a BLOCKER + reproducibility follow-up (round 3, commit
+          85069bf), then again after a manifest-SHA-mismatch finding (round
+          4, this commit). What changed and what it means:
 
           P1a FAIL-OPEN CLOSED (data-correctness bug). `reconstructed_factor`
           emitted `cum_factor = 1.0` whenever the union calendar had no row for
@@ -95,6 +97,29 @@ FIX ROUND 3 (BLOCKER + reproducibility bundle, this commit):
                file touches. `pytest -q`: 494 passed, 1 skipped
                (pre-existing, unrelated) — full suite.
 
+FIX ROUND 4 (manifest SHA mismatch, this commit):
+  1. MED       round 3's committed manifest recorded both tool runs at
+               `tool_git_sha=729f68a` — one commit BEHIND this PR's tip
+               (`85069bf`, which added `tools/build_pit_panel_shared.py`
+               and changed `_work_dir()`'s default fallback). The manifest
+               did not actually cover the surface it was reviewed against.
+               Reran both tools at HEAD=85069bf against the SAME cached
+               FMP inputs (`RQ_SPLIT_FIX_DIR=/private/tmp/rqbd-split-repro`,
+               zero new network calls) and replaced
+               `doc/design/2026-07-30-split-factor-run-manifest.json` with
+               the new run, now tagged `tool_git_sha=85069bf...`. Headline
+               numbers reproduce exactly: route counts (824 measured / 5
+               FAIL / 1 reconstructed), 298 authoritative no-event tickers,
+               0 unknown-retrieval tickers, panel = 1,380,434 rows / 830
+               tickers / 2014-01-02..2026-07-29, 0 PIT-validation
+               violations, 120 share facts with no factor. The superseded
+               round-3 manifest's identifying fields are kept in a
+               `superseded` block in the same file rather than silently
+               dropped. `pytest -q`: 494 passed, 1 skipped (pre-existing,
+               unrelated) — full suite, unchanged by this round (no
+               production code touched, only the committed manifest +
+               progress doc).
+
 WHAT:     `tools/build_split_factor.py` — per-ticker daily cumulative adjustment
           factor. `tools/build_pit_panel_v2.py` — the PIT panel rebuilt with
           split-adjusted share counts. `tools/build_pit_panel_shared.py` —
@@ -104,7 +129,8 @@ WHAT:     `tools/build_split_factor.py` — per-ticker daily cumulative adjustme
           `tests/test_split_factor_measured_and_anchoring.py` (round 3) —
           regression tests.
           `doc/design/2026-07-30-split-factor-run-manifest.json` — the
-          committed, checksummed evidence of a reproduced run (round 3).
+          committed, checksummed evidence of a reproduced run, regenerated
+          in round 4 at this commit's own `tool_git_sha` (see FIX ROUND 4).
 
 WHY/DIR:  `earnings_yield` and `book_to_price` were BLOCKED in the as-filed PIT
           panel: as-filed `dei:EntityCommonStockSharesOutstanding` is not
@@ -115,37 +141,42 @@ WHY/DIR:  `earnings_yield` and `book_to_price` were BLOCKED in the as-filed PIT
 
 EVIDENCE:
   artifact:       `doc/design/2026-07-30-split-factor-run-manifest.json` —
-                   round 3 reran `tools/build_split_factor.py` and
+                   round 4 reran `tools/build_split_factor.py` and
                    `tools/build_pit_panel_v2.py` end-to-end via
                    `RQ_SPLIT_FIX_DIR` against the SAME cached FMP inputs the
                    original session harvested (raw-price cache, 830-ticker
-                   split calendar + manifest), under round 2's stricter
-                   fail-closed `reconstructed_factor()` — zero new network
-                   calls.
+                   split calendar + manifest), at HEAD=85069bf (this PR's
+                   tip before this commit) — zero new network calls. The
+                   round-3 manifest this supersedes was tagged
+                   `tool_git_sha=729f68a`, one commit behind the surface it
+                   was reviewed against; the superseded fields are kept in
+                   the same file's `superseded` block, not dropped.
   prod or exp:    experiment. Read-only against production; no production
                    file written. Corrected panel + intermediate parquet stay
                    in `/private/tmp` scratch, never committed (large-blob
                    policy, matches this repo's Hard Boundaries).
-  existing data:  `[VERIFIED-now]` the round-3 rerun reproduced the original
+  existing data:  `[VERIFIED-now]` the round-4 rerun reproduced the original
                    session's headline numbers exactly, under the round-2
-                   stricter guard: 5 FAIL tickers (APTV, DELL, FERG, RBC,
-                   SW), 120 share facts with no factor, 53 dei units-error
-                   share facts across 36 tickers, 825/830 tickers with a
-                   published factor (824 measured + 1 reconstructed, that 1
-                   ticker among the 298 with an authoritative no-event
-                   answer; 0 tickers had an unknown/errored retrieval status
-                   on this harvest), 0 PIT-validation violations, panel =
-                   1,380,434 rows / 830 tickers / 2014-01-02..2026-07-29. The
-                   deeper V1-V5 comparative report (per-split continuity
-                   spot-check table, magnitude-vs-stage1, negative control,
+                   stricter guard and now tagged to the correct commit: 5
+                   FAIL tickers (APTV, DELL, FERG, RBC, SW), 120 share facts
+                   with no factor, 53 dei units-error share facts across 36
+                   tickers, 825/830 tickers with a published factor (824
+                   measured + 1 reconstructed, that 1 ticker among the 298
+                   with an authoritative no-event answer; 0 tickers had an
+                   unknown/errored retrieval status on this harvest), 0
+                   PIT-validation violations, panel = 1,380,434 rows / 830
+                   tickers / 2014-01-02..2026-07-29. The deeper V1-V5
+                   comparative report (per-split continuity spot-check
+                   table, magnitude-vs-stage1, negative control,
                    residual-jump census) from the original session's scratch
-                   `validate.py` was NOT re-executed in round 3 either — it
-                   depends on files outside this PR's tree (a separate
-                   `g6-stage1` baseline panel + `crossval_inwindow_events.csv`).
-                   Treat the rows below (the defect / after-repair /
-                   magnitudes / universe / negative-ctrl figures) as
-                   `[VERIFIED — prior work, 2026-07-30 session, not
-                   reproduced in round 2 or round 3]`, not freshly confirmed.
+                   `validate.py` was NOT re-executed in round 3 or round 4
+                   either — it depends on files outside this PR's tree (a
+                   separate `g6-stage1` baseline panel +
+                   `crossval_inwindow_events.csv`). Treat the rows below (the
+                   defect / after-repair / magnitudes / universe /
+                   negative-ctrl figures) as `[VERIFIED — prior work,
+                   2026-07-30 session, not reproduced in round 2, 3, or 4]`,
+                   not freshly confirmed.
   best-known?:    Yes for the reproduced numbers above; the un-reproduced
                    comparative numbers are the prior session's best-known and
                    unchanged, just not independently re-verified since.
@@ -224,11 +255,12 @@ SCOPE/LIMITS:
 
 VERIFICATION:
           `doc/design/2026-07-30-split-factor-run-manifest.json` carries the
-          checksummed round-3 reproduction (see EVIDENCE `artifact:` above);
-          it is the reviewable, committed record. The original session's
-          comparative V1-V5 report and continuity CSV lived only in
-          `/private/tmp` scratch and were never committed — that gap is not
-          closed by round 3 either, since regenerating them needs files
+          checksummed round-4 reproduction, tagged to this commit's own
+          `tool_git_sha` (see EVIDENCE `artifact:` above); it is the
+          reviewable, committed record. The original session's comparative
+          V1-V5 report and continuity CSV lived only in `/private/tmp`
+          scratch and were never committed — that gap is not closed by
+          round 3 or round 4 either, since regenerating them needs files
           outside this PR's tree (see EVIDENCE `existing data:` above); a
           follow-up would need to either commit `g6-stage1`'s baseline panel
           reference or accept the comparative numbers as prior-work-only.
