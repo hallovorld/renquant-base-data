@@ -27,16 +27,14 @@ def _work_dir() -> Path:
 
     Was a hard-coded agent-session path under /private/tmp, which made every
     number these tools produce unreproducible by anyone else (codex review on
-    base-data#58). Set RQ_SPLIT_FIX_DIR to relocate; the previous path stays as
-    the default so existing artifacts keep resolving.
+    base-data#58, round 2). Set RQ_SPLIT_FIX_DIR to relocate. The default is
+    now a plain relative dir under cwd -- NOT the prior session's ephemeral
+    /private/tmp path, which does not exist on another machine/session and
+    defeated the point of making this overridable.
     """
     import os
     env = os.environ.get("RQ_SPLIT_FIX_DIR")
-    if env:
-        return Path(env).expanduser()
-    return Path("/private/tmp/claude-502/"
-                "-Users-renhao-git-github-renquant-orchestrator/"
-                "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+    return Path(env).expanduser() if env else Path("scratch/split-fix")
 
 
 OUT = _work_dir()

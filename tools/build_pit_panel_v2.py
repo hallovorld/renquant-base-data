@@ -33,6 +33,9 @@ Writes only: the scratch --out path. NEVER a production path.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -46,16 +49,14 @@ def _work_dir() -> Path:
 
     Was a hard-coded agent-session path under /private/tmp, which made every
     number these tools produce unreproducible by anyone else (codex review on
-    base-data#58). Set RQ_SPLIT_FIX_DIR to relocate; the previous path stays as
-    the default so existing artifacts keep resolving.
+    base-data#58, round 2). Set RQ_SPLIT_FIX_DIR to relocate. The default is
+    now a plain relative dir under cwd -- NOT the prior session's ephemeral
+    /private/tmp path, which does not exist on another machine/session and
+    defeated the point of making this overridable.
     """
     import os
     env = os.environ.get("RQ_SPLIT_FIX_DIR")
-    if env:
-        return Path(env).expanduser()
-    return Path("/private/tmp/claude-502/"
-                "-Users-renhao-git-github-renquant-orchestrator/"
-                "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+    return Path(env).expanduser() if env else Path("scratch/split-fix")
 
 
 SCRATCH = _work_dir()
@@ -75,6 +76,21 @@ ALL_FEATS = CORRECTED + UNCHANGED
 
 # ------------------------------------------------------------------ Stage-1 machinery
 from build_pit_panel_shared import derive_q4, ttm, _dur, instant, load_asfiled, asof  # noqa: E402
+
+
+def _sha256(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _git_sha() -> str | None:
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parent,
+                           capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except Exception:
+        return None
 
 
 def _safe_ratio(numerator, denominator, *, max_abs_ratio: float = MAX_ABS_RATIO) -> pd.Series:
@@ -310,6 +326,29 @@ def main() -> int:
     print("\nwrote %s  rows=%d tickers=%d dates=%s..%s"
           % (out_path, len(panel), panel.ticker.nunique(),
              panel.date.min().date(), panel.date.max().date()))
+
+    # run bundle: input/output fingerprints so this run is independently reproducible
+    # and checkable (codex review round 2), not just a claim resting on an untracked
+    # scratch run.
+    manifest = {
+        "tool": "build_pit_panel_v2.py",
+        "tool_git_sha": _git_sha(),
+        "scratch": str(SCRATCH),
+        "inputs": {
+            "companyfacts_asfiled_raw.parquet": _sha256(RAW),
+            "split_factors_830.parquet": _sha256(SCRATCH / "split_factors_830.parquet"),
+            "split_factor_meta.csv": _sha256(SCRATCH / "split_factor_meta.csv"),
+        },
+        "n_tickers_with_factor": len(per),
+        "n_tickers_failed_split_basis": len(failed),
+        "n_share_facts_no_factor": n_nofac,
+        "output": {"path": str(out_path), "sha256": _sha256(out_path),
+                   "rows": len(panel), "tickers": int(panel.ticker.nunique())},
+        "generated_at": pd.Timestamp.utcnow().isoformat(),
+    }
+    (out_path.parent / (out_path.stem + ".run_manifest.json")).write_text(
+        json.dumps(manifest, indent=2))
+    print("  run manifest -> %s" % (out_path.parent / (out_path.stem + ".run_manifest.json")))
     return 0
 
 

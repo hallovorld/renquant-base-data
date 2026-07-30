@@ -47,7 +47,9 @@ Writes only: this scratch dir.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -61,19 +63,18 @@ def _work_dir() -> Path:
 
     Was a hard-coded agent-session path under /private/tmp, which made every
     number these tools produce unreproducible by anyone else (codex review on
-    base-data#58). Set RQ_SPLIT_FIX_DIR to relocate; the previous path stays as
-    the default so existing artifacts keep resolving.
+    base-data#58, round 2). Set RQ_SPLIT_FIX_DIR to relocate. The default is
+    now a plain relative dir under cwd -- NOT the prior session's ephemeral
+    /private/tmp path, which does not exist on another machine/session and
+    defeated the point of making this overridable.
     """
     import os
     env = os.environ.get("RQ_SPLIT_FIX_DIR")
-    if env:
-        return Path(env).expanduser()
-    return Path("/private/tmp/claude-502/"
-                "-Users-renhao-git-github-renquant-orchestrator/"
-                "428feb92-8ee7-4b4f-afed-1e4fa82ef367/scratchpad/split-fix")
+    return Path(env).expanduser() if env else Path("scratch/split-fix")
 
 
 OUT = _work_dir()
+assert not str(OUT.resolve()).startswith(str(RQ)), "output must be outside the production tree"
 CACHE = OUT / "raw_price_cache"
 
 # a step below this is immaterial (0.2% of market cap) and indistinguishable from the
@@ -209,6 +210,31 @@ def measured_factor(t: str, close: pd.Series,
     return full, {"why": "measured", "coverage": cov, "n_segments": int(seg[-1] + 1),
                   "max_within_segment_resid": resid, "steps": steps,
                   "tail_level_before_anchor": tail_level}
+
+
+def _sha256(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _dir_fingerprint(d: Path) -> dict:
+    """Cheap fingerprint of a cache directory's contents (name+size per file,
+    not full-content hashing -- the raw-price cache can be hundreds of files)."""
+    if not d.exists():
+        return {"n_files": 0, "fingerprint": None}
+    entries = sorted("%s:%d" % (p.name, p.stat().st_size) for p in d.glob("*.parquet"))
+    return {"n_files": len(entries),
+            "fingerprint": hashlib.sha256("\n".join(entries).encode()).hexdigest()}
+
+
+def _git_sha() -> str | None:
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parent,
+                           capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except Exception:
+        return None
 
 
 def load_split_retrieval_status() -> tuple[frozenset[str], frozenset[str]]:
@@ -352,6 +378,33 @@ def main() -> None:
     if (M.route == "FAIL").any():
         print("\n  FAILED tickers (features will be NaN, never silently 1.0):")
         print(M[M.route == "FAIL"].to_string(index=False))
+
+    # run bundle: input/output fingerprints so this run is independently reproducible
+    # and checkable (codex review round 2), not just a claim resting on an untracked
+    # scratch run.
+    no_ev, unknown = load_split_retrieval_status()
+    manifest = {
+        "tool": "build_split_factor.py",
+        "tool_git_sha": _git_sha(),
+        "workdir": str(OUT),
+        "inputs": {
+            "tickers.txt": _sha256(OUT / "tickers.txt"),
+            "fmp_splits_830.parquet": _sha256(OUT / "fmp_splits_830.parquet"),
+            "fmp_splits_830.manifest.json": _sha256(OUT / "fmp_splits_830.manifest.json"),
+            "raw_price_cache": _dir_fingerprint(CACHE),
+        },
+        "n_tickers_requested": len(tickers),
+        "n_authoritative_no_event": len(no_ev),
+        "n_unknown_retrieval_status": len(unknown),
+        "route_counts": {str(k): int(v) for k, v in dict(M.route.value_counts()).items()},
+        "outputs": {
+            "split_factors_830.parquet": _sha256(OUT / "split_factors_830.parquet"),
+            "split_factor_meta.csv": _sha256(OUT / "split_factor_meta.csv"),
+        },
+        "generated_at": pd.Timestamp.utcnow().isoformat(),
+    }
+    (OUT / "build_split_factor.run_manifest.json").write_text(json.dumps(manifest, indent=2))
+    print("\n  run manifest -> %s" % (OUT / "build_split_factor.run_manifest.json"))
 
 
 if __name__ == "__main__":

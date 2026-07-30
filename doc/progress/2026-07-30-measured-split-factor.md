@@ -1,10 +1,16 @@
 # Progress: split factors MEASURED against the stored series, not reconstructed
 
-STATUS:   builder + fail-closed guard + fixture tests DELIVERED. The corrected
-          panel and its continuity statistics are **PENDING REPRODUCIBLE
-          EXECUTION** — not delivered. No production path written.
+STATUS:   builder + fail-closed guard + fixture tests + BLOCKER fix +
+          reproducibility bundle DELIVERED. No production path written; the
+          corrected panel itself stays in scratch (data files are not
+          committed — large-blob policy). The comparative V1-V5 report
+          (magnitude-vs-stage1, negative control, residual jumps) remains
+          prior-work-only, not reproduced in this pass — see FIX ROUND 3
+          below.
 
-          Revised after codex P1/P1/P2. What changed and what it means:
+          Revised after codex P1/P1/P2 (round 2, commit 729f68a), then again
+          after a BLOCKER + reproducibility follow-up (round 3, this commit).
+          What changed and what it means:
 
           P1a FAIL-OPEN CLOSED (data-correctness bug). `reconstructed_factor`
           emitted `cum_factor = 1.0` whenever the union calendar had no row for
@@ -45,12 +51,60 @@ STATUS:   builder + fail-closed guard + fixture tests DELIVERED. The corrected
           Verified load-bearing rather than decorative: with the guard reverted,
           5 of the 7 FAIL.
 
+FIX ROUND 3 (BLOCKER + reproducibility bundle, this commit):
+  1. BLOCKER   `tools/build_pit_panel_shared.py` was imported by
+               `build_pit_panel_v2.py` since the ORIGINAL commit but never
+               committed -> `ModuleNotFoundError` on a fresh checkout, still
+               true after round 2 (round 2 did not touch this). Added the
+               file (verbatim Stage-1 machinery, as its own docstring says).
+  2. HIGH      round 2's `_work_dir()` still defaulted to the SAME
+               agent-session `/private/tmp/.../split-fix` path when
+               `RQ_SPLIT_FIX_DIR` is unset — configurable, but the default
+               still wasn't portable to "a later session or another
+               machine" per the original review wording. Changed the
+               fallback to a plain relative `scratch/split-fix` under cwd.
+               `RQ_SPLIT_FIX_DIR` (round 2's env var name) is unchanged and
+               still the way to point at existing artifacts.
+  3. P1        reproducibility bundle DELIVERED (was PENDING after round 2):
+               `build_split_factor.py` and `build_pit_panel_v2.py` now each
+               write a `*.run_manifest.json` (input file hashes, raw-price-
+               cache fingerprint, authoritative/unknown-retrieval counts,
+               route/output counts, output hashes, tool git SHA) on every
+               run. Reran both tools end-to-end against the ORIGINAL
+               session's cached FMP inputs under the NOW-STRICTER round-2
+               fail-closed logic — zero new network calls — and committed
+               the result at
+               `doc/design/2026-07-30-split-factor-run-manifest.json`. See
+               EVIDENCE below for exactly what that rerun reproduced; the
+               model A/B (renquant-model#107) can be unblocked on this
+               bundle for the two headline features, though the separate
+               V1-V5 comparative report below is still not re-verified (see
+               EVIDENCE `existing data:`).
+  4. MED       this EVIDENCE block was missing the required `artifact:` /
+               `existing data:` §4(b) fields (flagged again after round 2
+               left them out too). Added below.
+  5. P2        added `tests/test_split_factor_measured_and_anchoring.py`
+               (10 tests), complementing round 2's
+               `test_split_factor_fail_closed.py` (which covers the
+               reconstructed-route fail-closed contract) with the MEASURED
+               route: short-segment merge (dropped when uncorroborated, kept
+               when a real ex-date corroborates it), the NaN fail-closed
+               residual path, and cover-date anchoring
+               (`build_pit_panel_v2.factor_at`, both in-axis and the
+               pre-axis calendar extension) — none of which round 2's test
+               file touches. `pytest -q`: 494 passed, 1 skipped
+               (pre-existing, unrelated) — full suite.
+
 WHAT:     `tools/build_split_factor.py` — per-ticker daily cumulative adjustment
           factor. `tools/build_pit_panel_v2.py` — the PIT panel rebuilt with
-          split-adjusted share counts. `tools/harvest_splits_830.py`,
-          `tools/harvest_raw_prices.py` — inputs.
-          `doc/research/data/2026-07-30-split-factor-validation.txt` + the
-          continuity CSV.
+          split-adjusted share counts. `tools/build_pit_panel_shared.py` —
+          the Stage-1 machinery it depends on (round 3 BLOCKER fix).
+          `tools/harvest_splits_830.py`, `tools/harvest_raw_prices.py` —
+          inputs. `tests/test_split_factor_fail_closed.py` (round 2),
+          `tests/test_split_factor_measured_and_anchoring.py` (round 3) —
+          regression tests.
+          `doc/design/2026-07-30-split-factor-run-manifest.json` — the
+          committed, checksummed evidence of a reproduced run (round 3).
 
 WHY/DIR:  `earnings_yield` and `book_to_price` were BLOCKED in the as-filed PIT
           panel: as-filed `dei:EntityCommonStockSharesOutstanding` is not
@@ -59,7 +113,45 @@ WHY/DIR:  `earnings_yield` and `book_to_price` were BLOCKED in the as-filed PIT
           `book_to_price` alone carries 2.0% of the production scorer's gain, so
           these are the two fundamentals the live model leans on most.
 
-EVIDENCE: `[VERIFIED-now]`
+EVIDENCE:
+  artifact:       `doc/design/2026-07-30-split-factor-run-manifest.json` —
+                   round 3 reran `tools/build_split_factor.py` and
+                   `tools/build_pit_panel_v2.py` end-to-end via
+                   `RQ_SPLIT_FIX_DIR` against the SAME cached FMP inputs the
+                   original session harvested (raw-price cache, 830-ticker
+                   split calendar + manifest), under round 2's stricter
+                   fail-closed `reconstructed_factor()` — zero new network
+                   calls.
+  prod or exp:    experiment. Read-only against production; no production
+                   file written. Corrected panel + intermediate parquet stay
+                   in `/private/tmp` scratch, never committed (large-blob
+                   policy, matches this repo's Hard Boundaries).
+  existing data:  `[VERIFIED-now]` the round-3 rerun reproduced the original
+                   session's headline numbers exactly, under the round-2
+                   stricter guard: 5 FAIL tickers (APTV, DELL, FERG, RBC,
+                   SW), 120 share facts with no factor, 53 dei units-error
+                   share facts across 36 tickers, 825/830 tickers with a
+                   published factor (824 measured + 1 reconstructed, that 1
+                   ticker among the 298 with an authoritative no-event
+                   answer; 0 tickers had an unknown/errored retrieval status
+                   on this harvest), 0 PIT-validation violations, panel =
+                   1,380,434 rows / 830 tickers / 2014-01-02..2026-07-29. The
+                   deeper V1-V5 comparative report (per-split continuity
+                   spot-check table, magnitude-vs-stage1, negative control,
+                   residual-jump census) from the original session's scratch
+                   `validate.py` was NOT re-executed in round 3 either — it
+                   depends on files outside this PR's tree (a separate
+                   `g6-stage1` baseline panel + `crossval_inwindow_events.csv`).
+                   Treat the rows below (the defect / after-repair /
+                   magnitudes / universe / negative-ctrl figures) as
+                   `[VERIFIED — prior work, 2026-07-30 session, not
+                   reproduced in round 2 or round 3]`, not freshly confirmed.
+  best-known?:    Yes for the reproduced numbers above; the un-reproduced
+                   comparative numbers are the prior session's best-known and
+                   unchanged, just not independently re-verified since.
+  scope:          `renquant-base-data` tools + tests + docs only. No pin, no
+                   config, no production artifact touched.
+
   the defect      the step does NOT bite at the ex-date (shares have not updated
                   yet) but at the FIRST FILING AFTER it. NVDA 10:1 -> 9.33x
                   market-cap step; CMG 50:1 -> 48.89x; BKNG 25:1 -> 24.55x;
@@ -76,17 +168,13 @@ EVIDENCE: `[VERIFIED-now]`
   negative ctrl   COHR, LITE, LOW have factor == 1.0: max|new - old| =
                   0.000e+00 across 3161 / 2724 / 2657 rows. The correction does
                   not move unsplit names.
-  prod or exp:    Read-only. No production file written; mtime scan confirms zero
-                  files changed under the umbrella tree.
-  best-known?:    Yes, and it corrects a warning I issued myself. I told the
-                  builder that `split_ratio != 1.0` yields ~2,404 false events on
+  split_ratio     this corrects a warning I issued myself. I told the builder
+  column caveat   that `split_ratio != 1.0` yields ~2,404 false events on
                   AAPL. The real figure is 150,111 across the universe, because
                   the column's "no split" sentinel is 0.0 (91.0% of rows) or NaN
                   (8.95%) and ZERO rows carry a literal 1.0 -- and only 63 of 830
                   tickers have the column at all. It is a dead legacy field with
                   no live writer, unusable as a primary route.
-  scope:          `renquant-base-data` tools + docs only. No pin, no config, no
-                  artifact, no panel overwritten.
 
 WHY MEASURED, NOT RECONSTRUCTED:
           `CumAdj(t) = raw_price(t) / close_stored(t)`, using FMP's
@@ -135,13 +223,23 @@ SCOPE/LIMITS:
             by a real ex-date.
 
 VERIFICATION:
-          `doc/research/data/2026-07-30-split-factor-validation.txt` carries the
-          full report; the continuity CSV is auditable by eye per the table
-          above. Denominator safety matches #55's intent exactly: no epsilon,
-          zero or non-finite denominator -> NaN, |ratio| > 1e6 -> NaN rather than
+          `doc/design/2026-07-30-split-factor-run-manifest.json` carries the
+          checksummed round-3 reproduction (see EVIDENCE `artifact:` above);
+          it is the reviewable, committed record. The original session's
+          comparative V1-V5 report and continuity CSV lived only in
+          `/private/tmp` scratch and were never committed — that gap is not
+          closed by round 3 either, since regenerating them needs files
+          outside this PR's tree (see EVIDENCE `existing data:` above); a
+          follow-up would need to either commit `g6-stage1`'s baseline panel
+          reference or accept the comparative numbers as prior-work-only.
+          Denominator safety matches #55's intent exactly: no epsilon, zero or
+          non-finite denominator -> NaN, |ratio| > 1e6 -> NaN rather than
           clipped, and the guard sits strictly upstream of any z-scoring.
 
 NEXT:     This unblocks the two features the production scorer leans on most, so
           the v1-vs-v2 A/B (renquant-model#107) can be re-registered to include
           them -- its Stage A deliberately excluded both, which is why its
           "no measurable source difference" verdict says nothing about them.
+          Follow-up (not in this pass): commit or reference the `g6-stage1`
+          baseline artifact so the V1-V5 comparative report can be
+          regenerated and committed too, closing the gap noted above.
