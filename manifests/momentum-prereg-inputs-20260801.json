@@ -14,8 +14,12 @@
     "rule": "A VALID ROOT is any directory containing every file in `files` at its relative path such that each sha256 verifies. Consumers select a root from `candidate_roots` (or any operator-supplied directory), then MUST verify every file they read against `files` before use and refuse on any mismatch or absence (UNRESOLVED-DATA). Digest failure is never grounds to try another root silently \u2014 it is a finding. Because identity is the digest set, relocation NEVER requires editing this manifest's identity; `candidate_roots` is a non-normative cache hint list that a reviewed edit may extend.",
     "candidate_roots": [
       {
+        "path": "/Users/renhao/renquant-data-store/momentum-prereg-inputs-20260801",
+        "status": "PROPOSED durable store root (outside every protected tree; chmod -R a-w after copy + digest identity = immutability). Byte-move is machine-landing and executes ONLY on the operator's RELOCATE approval in https://github.com/hallovorld/renquant-orchestrator/issues/742; this PR stays DRAFT until then and its readiness flip includes the 294-digest verification output of the new root."
+      },
+      {
         "path": "/Users/renhao/git/github/RenQuant/data/exp/momentum_prereg_inputs_20260801",
-        "status": "non-normative cache; PROVISIONAL pending operator disposition in https://github.com/hallovorld/renquant-orchestrator/issues/742 (KEEP / RELOCATE / REMOVE). RELOCATE appends the new root here without touching identity."
+        "status": "current provisional cache (the incident-recorded umbrella write, same issue). Listed second: resolution prefers the durable store once it exists; digest verification governs validity either way."
       }
     ]
   },
