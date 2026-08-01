@@ -3,9 +3,21 @@
   "schema_version": "frozen-input-snapshot-v1",
   "immutable": true,
   "purpose": "Byte-exact snapshot of the three inputs pinned by the GOAL-7 momentum preregistration (renquant-model#164 \u00a72, as amended by #171). The pinned live paths refresh daily, so the frozen digests stop resolving within 24h of the freeze; this snapshot is the durable referent. Digests are NORMATIVE; the location is advisory and may be updated by a reviewed revision without changing identity.",
-  "location": {
-    "path": "/Users/renhao/git/github/RenQuant/data/exp/momentum_prereg_inputs_20260801",
-    "status": "PROVISIONAL pending renquant-orchestrator#742 (operator disposition of the umbrella-tree write). KEEP blesses this path; RELOCATE updates this field in a reviewed revision; digests never change."
+  "identity": {
+    "normative": "dataset_id + the sha256 digests in `files` + `combined_ohlcv_digest`. NOTHING ELSE \u2014 no path, no host, no candidate root is part of the identity.",
+    "combined_ohlcv_sha256": "4d4638a9f0d69f940fb36a73c28e92883d51b686ab032aebedf559c174c2c1d0",
+    "panel_sha256": "55811f6387e67411fe11a20eb1d5d929086c5a9dc2675496f3d8592fed2c0dba",
+    "sector_sha256": "ec26bb1efcf8463519366478ae72c933f93c9d110d65f8af1634e2fcbb578d3b"
+  },
+  "resolver": {
+    "scheme": "content-addressed-v1",
+    "rule": "A VALID ROOT is any directory containing every file in `files` at its relative path such that each sha256 verifies. Consumers select a root from `candidate_roots` (or any operator-supplied directory), then MUST verify every file they read against `files` before use and refuse on any mismatch or absence (UNRESOLVED-DATA). Digest failure is never grounds to try another root silently \u2014 it is a finding. Because identity is the digest set, relocation NEVER requires editing this manifest's identity; `candidate_roots` is a non-normative cache hint list that a reviewed edit may extend.",
+    "candidate_roots": [
+      {
+        "path": "/Users/renhao/git/github/RenQuant/data/exp/momentum_prereg_inputs_20260801",
+        "status": "non-normative cache; PROVISIONAL pending operator disposition in https://github.com/hallovorld/renquant-orchestrator/issues/742 (KEEP / RELOCATE / REMOVE). RELOCATE appends the new root here without touching identity."
+      }
+    ]
   },
   "resolution_contract": "A consumer MUST verify every file it reads against the sha256 recorded here before use, and MUST treat any mismatch or absence as UNRESOLVED-DATA (refuse, do not substitute the live path).",
   "combined_ohlcv_digest": {
@@ -17,7 +29,7 @@
     "copied_at": "2026-08-01 (before that day's daily refresh aged out the pinned bytes)",
     "verified_at_copy": "all three prereg digests recomputed byte-identical after copy",
     "prereg": "renquant-model#164 (frozen 2026-08-01) + amendment renquant-model#171",
-    "incident_record": "renquant-orchestrator#742"
+    "incident_record": "https://github.com/hallovorld/renquant-orchestrator/issues/742"
   },
   "files": {
     "panel.parquet": {
