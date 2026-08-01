@@ -9,7 +9,7 @@ Review of renquant-model#171 (codex): a prereg amendment cannot point at an untr
 ## What it pins `[本次实测 2026-08-01]`
 
 `manifests/momentum-prereg-inputs-20260801.json` — 294 file entries, each with sha256 +
-byte size: the panel (`55811f63…`, 425,916,894 bytes), the sector snapshot
+byte size: the panel (`55811f63…`, 797,218,434 bytes — read back from the manifest, not asserted), the sector snapshot
 (`ec26bb1e…`), and 292 per-ticker OHLCV files whose combined digest `4d4638a9…`
 reproduces the prereg's §2 arithmetic exactly (verified at manifest build; the three
 headline digests are byte-identical to the frozen prereg pins).
