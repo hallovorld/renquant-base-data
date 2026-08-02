@@ -15,11 +15,11 @@
     "candidate_roots": [
       {
         "path": "/Users/renhao/renquant-data-store/momentum-prereg-inputs-20260801",
-        "status": "PROPOSED durable store root (outside every protected tree; chmod -R a-w after copy + digest identity = immutability). Byte-move is machine-landing and executes ONLY on the operator's RELOCATE approval in https://github.com/hallovorld/renquant-orchestrator/issues/742; this PR stays DRAFT until then and its readiness flip includes the 294-digest verification output of the new root."
+        "status": "DURABLE ROOT, PUBLISHED 2026-08-01: RELOCATE executed on operator direction (orch#742) \u2014 all 294 file digests verified byte-identical against this manifest at copy time, then the tree was frozen read-only (chmod -R a-w, mode dr-xr-xr-x). Root remains ADVISORY per the resolver rule; identity lives only in the digests."
       },
       {
         "path": "/Users/renhao/git/github/RenQuant/data/exp/momentum_prereg_inputs_20260801",
-        "status": "current provisional cache (the incident-recorded umbrella write, same issue). Listed second: resolution prefers the durable store once it exists; digest verification governs validity either way."
+        "status": "legacy provisional cache (the self-reported umbrella write, orch#742); retained until the operator's explicit deletion word; never preferred over the durable root above."
       }
     ]
   },
