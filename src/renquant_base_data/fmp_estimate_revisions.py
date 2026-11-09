@@ -110,6 +110,12 @@ DEFAULT_UNIVERSE_CONFIG = Path(
 )
 REQUEST_TIMEOUT_S = 30
 THROTTLE_S = 0.20  # gentle on the rate limit (FMP Starter = 300/min)
+# Transient failures (dropped connection, 429, 5xx) are retried with a short
+# backoff before a (endpoint, symbol) is counted as an error; a persistent
+# failure still counts, so the partial/no-publish contract is unchanged.
+FETCH_ATTEMPTS = 4
+RETRY_BACKOFF_S = (1.0, 3.0, 8.0)
+_RETRYABLE_HTTP = frozenset({429, 500, 502, 503, 504})
 # Coverage floor: the fraction of the requested universe that must return data
 # (per endpoint) for the snapshot to be considered complete and publishable.
 # Free FMP returns ~134/142 (~94%) for these endpoints; the ~8 misses are
@@ -239,29 +245,47 @@ def load_universe(universe_arg: str | None) -> list[str]:
 
 
 def fetch_endpoint(
-    session: "requests.Session", endpoint_path: str, sym: str, api_key: str
+    session: "requests.Session",
+    endpoint_path: str,
+    sym: str,
+    api_key: str,
+    *,
+    sleep: Any = time.sleep,
 ) -> tuple[list[dict[str, Any]] | None, str | None]:
-    """Fetch one (endpoint, symbol). Returns (records, error). Never raises."""
+    """Fetch one (endpoint, symbol). Returns (records, error). Never raises.
+
+    Transport errors and HTTP 429/5xx are retried (``FETCH_ATTEMPTS`` total,
+    ``RETRY_BACKOFF_S`` between); the LAST error is returned if all fail. Other
+    HTTP codes (401/403/404 = plan-locked or bad key) are not retried."""
     # ``requests`` is imported lazily, so resolve its exception base here (the
     # live path has already imported it via ``main``/``_require_requests``). Any
     # transport error becomes a clean ``fetch_error`` rather than propagating.
     request_exception = _require_requests().RequestException
     url = f"{FMP_STABLE_BASE}/{endpoint_path.format(sym=sym)}&apikey={api_key}"
-    try:
-        resp = session.get(url, timeout=REQUEST_TIMEOUT_S)
-    except request_exception as exc:
-        return None, f"fetch_error:{type(exc).__name__}"
-    if resp.status_code != 200:
-        return None, f"http_{resp.status_code}"
-    try:
-        data = resp.json()
-    except ValueError:
-        return None, "bad_json"
-    if isinstance(data, dict):
-        data = [data]
-    if not isinstance(data, list):
-        return None, "unexpected_shape"
-    return data, None
+    err: str | None = None
+    for attempt in range(FETCH_ATTEMPTS):
+        if attempt:
+            sleep(RETRY_BACKOFF_S[min(attempt - 1, len(RETRY_BACKOFF_S) - 1)])
+        try:
+            resp = session.get(url, timeout=REQUEST_TIMEOUT_S)
+        except request_exception as exc:
+            err = f"fetch_error:{type(exc).__name__}"
+            continue
+        if resp.status_code in _RETRYABLE_HTTP:
+            err = f"http_{resp.status_code}"
+            continue
+        if resp.status_code != 200:
+            return None, f"http_{resp.status_code}"
+        try:
+            data = resp.json()
+        except ValueError:
+            return None, "bad_json"
+        if isinstance(data, dict):
+            data = [data]
+        if not isinstance(data, list):
+            return None, "unexpected_shape"
+        return data, None
+    return None, err
 
 
 def _sha256_file(path: Path) -> str:

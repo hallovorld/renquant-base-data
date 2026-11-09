@@ -367,3 +367,61 @@ def test_dry_run_writes_nothing(monkeypatch, tmp_path, tickers):
     assert res["status"] == "dry_run"
     assert res["published"] is False
     assert not (tmp_path / as_of).exists()
+
+
+# --- fetch_endpoint retry (2026-11-05: 3 consecutive partial days, 2-13 dropped
+# connections per endpoint per day, none retried) ------------------------------
+class _Resp:
+    def __init__(self, status=200, payload=None):
+        self.status_code = status
+        self._payload = payload if payload is not None else [{"symbol": "X"}]
+
+    def json(self):
+        return self._payload
+
+
+class _ScriptedSession:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    def get(self, url, timeout=None):
+        self.calls += 1
+        o = self.outcomes.pop(0)
+        if isinstance(o, Exception):
+            raise o
+        return o
+
+
+def _conn_err():
+    import requests
+
+    return requests.ConnectionError("RemoteDisconnected")
+
+
+def test_fetch_endpoint_retries_transient_transport_error():
+    sess = _ScriptedSession([_conn_err(), _conn_err(), _Resp()])
+    sleeps = []
+    recs, err = snap.fetch_endpoint(sess, "e?symbol={sym}", "X", "k", sleep=sleeps.append)
+    assert err is None and recs == [{"symbol": "X"}]
+    assert sess.calls == 3 and sleeps == [1.0, 3.0]
+
+
+def test_fetch_endpoint_retries_429_and_5xx_then_succeeds():
+    sess = _ScriptedSession([_Resp(429), _Resp(503), _Resp()])
+    recs, err = snap.fetch_endpoint(sess, "e?symbol={sym}", "X", "k", sleep=lambda s: None)
+    assert err is None and sess.calls == 3
+
+
+def test_fetch_endpoint_persistent_failure_still_reports_last_error():
+    sess = _ScriptedSession([_conn_err()] * snap.FETCH_ATTEMPTS)
+    recs, err = snap.fetch_endpoint(sess, "e?symbol={sym}", "X", "k", sleep=lambda s: None)
+    assert recs is None and err == "fetch_error:ConnectionError"
+    assert sess.calls == snap.FETCH_ATTEMPTS
+
+
+@pytest.mark.parametrize("code", [401, 403, 404])
+def test_fetch_endpoint_does_not_retry_plan_locked_codes(code):
+    sess = _ScriptedSession([_Resp(code)])
+    recs, err = snap.fetch_endpoint(sess, "e?symbol={sym}", "X", "k", sleep=lambda s: None)
+    assert recs is None and err == f"http_{code}" and sess.calls == 1
